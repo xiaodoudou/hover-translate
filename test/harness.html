@@ -1,0 +1,269 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Hover Translate logic harness</title>
+<style>
+  body { font: 14px/1.6 system-ui, sans-serif; margin: 2rem; }
+  #results { font-family: ui-monospace, monospace; white-space: pre-wrap; }
+  .pass { color: #15803d; } .fail { color: #b91c1c; font-weight: 700; }
+  #stage { border: 1px solid #e2e8f0; padding: 1rem; margin-top: 2rem; opacity: .5; }
+</style>
+</head>
+<body>
+<h1>Logic harness</h1>
+<p>Runs the real <code>block.js</code>, <code>richtext.js</code> and <code>script.js</code> against the
+fixture DOM. Serve the extension folder over http and open this page: module imports do not work from
+<code>file://</code>.</p>
+<div id="results">running...</div>
+<div id="stage"></div>
+
+<script type="module">
+import { resolveBlock } from "../src/content/block.js";
+import { serialize, applyInPlace, rebuild } from "../src/content/richtext.js";
+import { hasScriptForeignTo, pickLanguage, languageFromScript } from "../src/lib/script.js";
+
+const out = [];
+let failures = 0;
+
+function check(name, condition, detail = "") {
+  if (condition) out.push(`<span class="pass">PASS</span> ${name}`);
+  else { failures++; out.push(`<span class="fail">FAIL</span> ${name} ${detail}`); }
+}
+
+const html = await (await fetch("./fixture.html")).text();
+const doc = new DOMParser().parseFromString(html, "text/html");
+document.getElementById("stage").append(...doc.body.childNodes);
+
+const q = (sel) => document.querySelector(sel);
+const byText = (sel, needle) =>
+  [...document.querySelectorAll(sel)].find((el) => el.textContent.includes(needle));
+const probe = (fragment) => {
+  const box = document.createElement("div");
+  box.append(fragment);
+  return box;
+};
+
+// --- block resolution ---------------------------------------------------
+const nested = byText("p", "dois spans aninhados");
+check("inner nested span resolves to its paragraph",
+  resolveBlock(nested.querySelector("span span")) === nested);
+check("text node inside a paragraph resolves to the paragraph",
+  resolveBlock(nested.querySelector("span span").firstChild) === nested);
+check("code inside pre is refused", resolveBlock(q("pre code")) === null);
+check("icon font is refused", resolveBlock(q("i.fa")) === null);
+check("aria-hidden decoration is refused", resolveBlock(q('span[aria-hidden="true"]')) === null);
+check("notranslate paragraph is refused", resolveBlock(q("p.notranslate")) === null);
+check("textarea is refused", resolveBlock(q("textarea")) === null);
+const li = byText("li", "Eerste punt");
+check("list item resolves to itself, not the list", resolveBlock(li) === li);
+const td = byText("td", "Łączy");
+check("table cell resolves to itself", resolveBlock(td) === td);
+
+// --- the real world case: an order row -----------------------------------
+const cell = q("#order-cell");
+const cellPlan = serialize(cell);
+check("the order cell serialises", cellPlan !== null);
+check("every element became a numbered tag", cellPlan?.elements.length === 8,
+  JSON.stringify(cellPlan?.elements.map((e) => e.node.tagName)));
+check("the disabled input is opaque, sent as an empty pair",
+  cellPlan?.elements[2].node.tagName === "INPUT" && cellPlan.elements[2].opaque === true &&
+    cellPlan.text.includes("<b2></b2>"), JSON.stringify(cellPlan?.text));
+check("only the text is sent, tags carry the structure",
+  cellPlan?.text ===
+  "<b0><b1><b2></b2></b1><b3>2026-07-23</b3></b0><b4><b5>订单号</b5><b6>: </b6><b7>3313704182876019697</b7></b4>",
+  JSON.stringify(cellPlan?.text));
+
+// Exactly what the engines returned when this was tested against them.
+const cellReply =
+  "<b0><b1><b2></b2></b1><b3>2026-07-23</b3></b0><b4><b5>Order number</b5><b6>: </b6><b7>3313704182876019697</b7></b4>";
+const cellBox = probe(rebuild(cellReply, cellPlan.elements));
+
+check("the label survives", cellBox.querySelector("label.checkbox-label") !== null, cellBox.innerHTML);
+check("the checkbox span survives", cellBox.querySelector("span.checkbox") !== null);
+check("the disabled input survives with its attributes",
+  cellBox.querySelector('input[type="checkbox"]')?.disabled === true, cellBox.innerHTML);
+check("the date keeps its own create-time span, so it stays bold",
+  cellBox.querySelector("span.create-time")?.textContent === "2026-07-23", cellBox.innerHTML);
+check("the order number keeps its data attribute",
+  cellBox.querySelector("span[data-spm-anchor-id]")?.textContent === "3313704182876019697");
+check("only the text changed", cellBox.textContent === "2026-07-23Order number: 3313704182876019697",
+  JSON.stringify(cellBox.textContent));
+check("the rebuilt tree has the same element count as the original",
+  cellBox.querySelectorAll("*").length === cell.querySelectorAll("*").length,
+  `${cellBox.querySelectorAll("*").length} vs ${cell.querySelectorAll("*").length}`);
+
+// --- applied in place: not one node created or destroyed ------------------
+const cellNodesBefore = [...cell.querySelectorAll("*")];
+const cellEdits = applyInPlace(cell, cellReply, serialize(cell));
+check("the reply applies by editing text alone", cellEdits !== null);
+check("every element is the very same object afterwards",
+  [...cell.querySelectorAll("*")].length === cellNodesBefore.length &&
+    [...cell.querySelectorAll("*")].every((n, i) => n === cellNodesBefore[i]));
+check("the chinese label became english in its own span",
+  cell.querySelector("span")?.textContent !== undefined && cell.textContent.includes("Order number"),
+  cell.textContent);
+check("the date stayed in its create-time span",
+  cell.querySelector("span.create-time")?.textContent === "2026-07-23");
+check("the input was not disturbed",
+  cell.querySelector('input[type="checkbox"]')?.disabled === true);
+
+for (let i = cellEdits.length - 1; i >= 0; i--) cellEdits[i][0].nodeValue = cellEdits[i][1];
+check("undoing the edits restores the original text exactly",
+  cell.textContent === "2026-07-23订单号: 3313704182876019697", JSON.stringify(cell.textContent));
+
+// --- reordering, which is the whole reason tags are sent ------------------
+const fr = byText("p", "canapé rouge");
+const frPlan = serialize(fr);
+check("a paragraph with a link and a strong serialises", frPlan?.elements.length === 2);
+const frBox = probe(rebuild(
+  "Nobody <b1>dares</b1> disturb the cat sleeping on the <b0>red sofa</b0>.", frPlan.elements));
+check("the link moved to where the translation put it",
+  frBox.textContent === "Nobody dares disturb the cat sleeping on the red sofa.",
+  JSON.stringify(frBox.textContent));
+check("the link kept its href", frBox.querySelector("a")?.getAttribute("href") === "https://example.com");
+check("the strong survives with its own translated text",
+  frBox.querySelector("strong")?.textContent === "dares", frBox.innerHTML);
+
+// --- styling is never folded away ---------------------------------------
+const price = byText("p", "全国联保");
+const pricePlan = serialize(price);
+const priceBox = probe(rebuild(
+  "Priced from <b0>¥199</b0>, with a nationwide warranty.", pricePlan.elements));
+check("the short styled span keeps its class",
+  priceBox.querySelector("span.price")?.textContent === "¥199", priceBox.innerHTML);
+
+const wrapped = byText("p", "Consultez la");
+const wrappedPlan = serialize(wrapped);
+const wrappedBox = probe(rebuild(
+  "See the <b0><b1>documentation</b1></b0> for details.", wrappedPlan.elements));
+check("a wrapper chain keeps both elements",
+  wrappedBox.querySelector("a > span.price")?.textContent === "documentation", wrappedBox.innerHTML);
+
+// --- opaque content is never exposed or altered --------------------------
+const es = byText("p", "npm install");
+const esPlan = serialize(es);
+check("a code span is opaque and its text is not sent",
+  esPlan.text.includes("<b0></b0>") && !esPlan.text.includes("npm install"), JSON.stringify(esPlan.text));
+const esBox = probe(rebuild("Run <b0></b0> in the project folder.", esPlan.elements));
+check("the code span comes back byte for byte",
+  esBox.querySelector("code")?.textContent === "npm install --save-dev vite", esBox.innerHTML);
+
+const it = byText("p", "il nostro logo");
+const itPlan = serialize(it);
+const itBox = probe(rebuild("Here is our logo <b0></b0> and a footnote<b1></b1>.", itPlan.elements));
+check("the image survives", itBox.querySelector("img") !== null);
+check("the superscript survives", itBox.querySelector("sup")?.textContent === "1");
+
+// --- spacing swallowed at a tag boundary ---------------------------------
+const spacingPlan = serialize(fr);
+const spacingBox = probe(rebuild(
+  "The cat sleeps on the<b0>red sofa</b0>today and nobody <b1>dares</b1> to disturb it.",
+  spacingPlan.elements, "", spacingPlan.text,
+));
+check("a space lost before a tag is put back",
+  spacingBox.textContent.includes("the red sofa"), JSON.stringify(spacingBox.textContent));
+check("and after it too",
+  spacingBox.textContent.includes("sofa today"), JSON.stringify(spacingBox.textContent));
+
+const cjkPlan = serialize(byText("p", "全国联保"));
+const cjkBox = probe(rebuild("价格<b0>¥199</b0>起", cjkPlan.elements, "", cjkPlan.text));
+check("a language without spaces is left alone",
+  cjkBox.textContent === "价格¥199起", JSON.stringify(cjkBox.textContent));
+
+// --- stray capitals at tag boundaries ------------------------------------
+// Both replies below are verbatim engine output, capitals and all.
+const split = document.createElement("p");
+split.append(
+  document.createTextNode("价格 "),
+  Object.assign(document.createElement("span"), { className: "price", textContent: "199元" }),
+  document.createTextNode(" 起，支持"),
+  Object.assign(document.createElement("span"), { className: "price", textContent: "全国联保" }),
+  document.createTextNode("服务。"),
+);
+document.getElementById("stage").append(split);
+const splitPlan = serialize(split);
+check("the capitalisation fixture has two elements", splitPlan?.elements.length === 2,
+  JSON.stringify(splitPlan?.text));
+const splitBox = probe(rebuild(
+  "price<b0> 199 yuan</b0> Rise, support<b1> Nationwide warranty</b1> Serve.",
+  splitPlan.elements,
+  "Prices start from 199 yuan, with nationwide warranty service available.",
+));
+check("a capital invented at a tag boundary is put back down",
+  splitBox.textContent === "price 199 yuan rise, support nationwide warranty serve.",
+  JSON.stringify(splitBox.textContent));
+
+const keptBox = probe(rebuild(
+  "price<b0> 199 yuan</b0> Rise, support<b1> Nationwide warranty</b1> Serve.",
+  splitPlan.elements,
+  "",
+));
+check("without a reference translation nothing is touched",
+  keptBox.textContent.includes("Rise"), JSON.stringify(keptBox.textContent));
+
+const properBox = probe(rebuild(
+  "Order No.:<b0> July</b0> and<b1> Nationwide</b1> cover.",
+  splitPlan.elements,
+  "Order No.: July 23, 2026, nationwide cover.",
+));
+check("a genuine proper noun is left capitalised",
+  properBox.textContent.includes("July") && properBox.textContent.includes("nationwide"),
+  JSON.stringify(properBox.textContent));
+
+const startBox = probe(rebuild(
+  "<b0>Prices</b0> start from 199. <b1>Nationwide</b1> cover.",
+  splitPlan.elements,
+  "prices start. nationwide cover.",
+));
+check("the first word of the block keeps its capital",
+  startBox.textContent.startsWith("Prices"), JSON.stringify(startBox.textContent));
+check("a word after a full stop keeps its capital",
+  startBox.textContent.includes(". Nationwide"), JSON.stringify(startBox.textContent));
+
+// --- a mangled reply is refused rather than written into the page ---------
+check("a reordering reply cannot be edited in place, so it falls back",
+  applyInPlace(fr, "Nobody <b1>dares</b1> disturb the cat on the <b0>red sofa</b0>.", frPlan) === null);
+check("the failed attempt left the paragraph exactly as it was",
+  fr.textContent.includes("canapé rouge") && fr.textContent.includes("ose"), fr.textContent);
+
+check("a missing element is detected", rebuild("Nobody dares.", frPlan.elements) === null);
+check("an unbalanced tag is detected",
+  rebuild("<b0>red sofa<b1>dares</b1>.", frPlan.elements) === null);
+check("a repeated index is detected",
+  rebuild("<b0>a</b0><b0>b</b0><b1>c</b1>", frPlan.elements) === null);
+check("an index that was never sent is detected",
+  rebuild("<b0>a</b0><b1>b</b1><b9>c</b9>", frPlan.elements) === null);
+check("a block whose own text looks like a tag is refused", (() => {
+  const el = document.createElement("p");
+  el.textContent = "use <b0> to open";
+  return serialize(el) === null;
+})());
+
+// --- writing system beats the detector ----------------------------------
+const MIXED = "奥丁2掌机Odin2游戏机专用DOCK充电扩展坞支持4K60帧输出金属外壳";
+const ORDER = "2026-07-18订单号: 3312870351913019697";
+check("han text is foreign to english", hasScriptForeignTo(MIXED, "en"));
+check("an order number with han is foreign to english", hasScriptForeignTo(ORDER, "en"));
+check("han text is not foreign to chinese", !hasScriptForeignTo(MIXED, "zh"));
+check("latin brand names are never evidence against a language",
+  hasScriptForeignTo("Odin2 DOCK 4K60", "zh") === false);
+check("plain english is foreign to nothing", !hasScriptForeignTo("This is plain English.", "en"));
+check("kana wins over han for japanese", languageFromScript("これは日本語のテスト") === "ja");
+check("han alone falls back to chinese", languageFromScript(MIXED) === "zh");
+check("cyrillic falls back to russian", languageFromScript("Это тест") === "ru");
+check("a wrong 'en' detection is overruled by the script",
+  pickLanguage([{ detectedLanguage: "en", confidence: 0.9 }, { detectedLanguage: "zh", confidence: 0.1 }], MIXED) === "zh");
+check("overruled even with no chinese candidate offered",
+  pickLanguage([{ detectedLanguage: "en", confidence: 0.99 }], ORDER) === "zh");
+check("genuine english is still detected as english",
+  pickLanguage([{ detectedLanguage: "en", confidence: 0.95 }], "This paragraph is already in English.") === "en");
+check("low confidence on latin text yields nothing",
+  pickLanguage([{ detectedLanguage: "en", confidence: 0.1 }], "hmm") === null);
+
+document.getElementById("results").innerHTML =
+  out.join("\n") + `\n\n${failures === 0 ? "ALL PASS" : failures + " FAILURE(S)"}`;
+document.title = failures === 0 ? "harness: all pass" : `harness: ${failures} failed`;
+</script>
+</body>
+</html>

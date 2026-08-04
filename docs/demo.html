@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>科技日报</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: #f8fafc; color: #0f172a;
+    font: 16px/1.75 "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  }
+  header { background: #fff; border-bottom: 1px solid #e2e8f0; padding: 14px 0; }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 0 28px; }
+  .brand { font-size: 19px; font-weight: 800; color: #0e7490; letter-spacing: .02em; }
+  .nav { float: right; color: #64748b; font-size: 14px; }
+  article { padding: 34px 0 40px; }
+  h1 { font-size: 30px; line-height: 1.35; margin: 0 0 10px; }
+  .meta { color: #64748b; font-size: 13.5px; margin-bottom: 22px; }
+  p { margin: 0 0 18px; }
+  .lead { font-size: 17.5px; color: #334155; }
+  a { color: #0e7490; }
+  figure { margin: 24px 0; }
+  .shot { height: 168px; border-radius: 10px;
+          background: linear-gradient(120deg, #0e7490, #38bdf8 60%, #a5f3fc); }
+  figcaption { color: #64748b; font-size: 13px; margin-top: 8px; }
+  .card { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 16px 18px; margin: 22px 0; }
+  .card h3 { margin: 0 0 10px; font-size: 15px; }
+  table { border-collapse: collapse; width: 100%; font-size: 14.5px; }
+  td, th { border-bottom: 1px solid #e2e8f0; padding: 9px 6px; text-align: left; }
+  th { color: #64748b; font-weight: 600; }
+  code { background: #f1f5f9; padding: .1em .4em; border-radius: 4px; font-size: .9em; }
+  .tip { background: #ecfeff; border: 1px solid #a5f3fc; border-radius: 10px;
+         padding: 12px 16px; margin: 0 0 26px; font-size: 14px; color: #155e75; }
+  .tip b { color: #0e7490; }
+  kbd { background: #fff; border: 1px solid #a5f3fc; border-bottom-width: 2px;
+        border-radius: 4px; padding: 1px 5px; font: inherit; font-size: 12.5px; }
+</style>
+</head>
+<body>
+<header><div class="wrap"><span class="brand">科技日报</span><span class="nav">首页 / 科技 / 评论</span></div></header>
+
+<div class="wrap">
+<article>
+  <p class="tip" lang="en" translate="no">
+    <b>Demo page.</b> Point at any paragraph below and tap <kbd>Ctrl</kbd>. Switch between Replace,
+    Both and Bubble in the extension popup to capture each mode. This box is marked
+    <code>translate="no"</code>, so it stays in English and out of your screenshots.
+  </p>
+
+  <h1>掌上游戏机市场迎来新一轮竞争</h1>
+  <p class="meta">2026年7月23日 / 记者 李明</p>
+
+  <p class="lead">随着新一代处理器的普及，掌上游戏机的性能已经接近入门级台式机，厂商之间的竞争也进入了新的阶段。</p>
+
+  <p>本周发布的新机型配备了更大的散热模块和更高刷新率的屏幕。厂商表示，这一设计能够在长时间游戏过程中保持稳定的帧率，而不会出现明显的降频现象。详细的规格可以在 <a href="https://example.com">官方网站</a> 上查阅。</p>
+
+  <figure>
+    <div class="shot"></div>
+    <figcaption>新款掌机的金属外壳与扩展坞（图片来源: 厂商提供）</figcaption>
+  </figure>
+
+  <p>除了硬件升级之外，配件生态也在快速扩张。专用充电扩展坞支持 4K60 帧输出，可以直接连接电视使用。开发者只需要在配置文件中加入 <code>--enable-dock</code> 参数即可启用该功能。</p>
+
+  <div class="card">
+    <h3>主要规格对比</h3>
+    <table>
+      <tr><th>项目</th><th>上代机型</th><th>本代机型</th></tr>
+      <tr><td>屏幕刷新率</td><td>60 赫兹</td><td>120 赫兹</td></tr>
+      <tr><td>电池容量</td><td>5000 毫安时</td><td>8000 毫安时</td></tr>
+      <tr><td>视频输出</td><td>1080p</td><td>4K60 帧</td></tr>
+    </table>
+  </div>
+
+  <p>分析人士认为，价格仍然是决定销量的关键因素。目前的预售价格为 <b>2499 元</b> 起，比上一代产品高出约百分之十五，但考虑到性能提升，这一涨幅在可以接受的范围之内。</p>
+
+  <p lang="ja">日本語の段落もあります。マウスを乗せてキーを押すと、この文も英語に置き換わります。</p>
+  <p lang="ru">Здесь абзац на русском языке, чтобы проверить другой алфавит.</p>
+</article>
+</div>
+</body>
+</html>

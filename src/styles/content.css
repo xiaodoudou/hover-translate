@@ -1,0 +1,114 @@
+/* Everything here is !important because it has to win against arbitrary page CSS.
+   Translated text gets no styling of its own: once replaced it should look like the page's own.
+   The loading state is a painted background, not a border, an outline or an appended node, so it
+   costs no layout at all: nothing reflows, nothing shifts, and no element is added to the page. */
+
+@keyframes ht-sweep {
+  from {
+    background-position: -35% 100%;
+  }
+  to {
+    background-position: 135% 100%;
+  }
+}
+
+.ht-pending {
+  background-image: linear-gradient(
+    90deg,
+    rgba(14, 165, 233, 0) 0%,
+    rgba(56, 189, 248, 0.9) 35%,
+    rgba(14, 165, 233, 1) 50%,
+    rgba(56, 189, 248, 0.9) 65%,
+    rgba(14, 165, 233, 0) 100%
+  ) !important;
+  background-repeat: no-repeat !important;
+  background-size: 45% 2px !important;
+  background-origin: padding-box !important;
+  background-clip: border-box !important;
+  background-attachment: scroll !important;
+  animation: ht-sweep 1.1s linear infinite !important;
+  cursor: progress !important;
+  /* Deliberately not !important: an important author declaration outranks a CSS animation, so
+     marking this would pin the gradient off-screen and nothing would ever move. The keyframes still
+     beat any normal page rule. */
+  background-position: -35% 100%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ht-pending {
+    animation: none !important;
+    background-size: 100% 2px !important;
+    background-position: 0 100% !important;
+  }
+}
+
+.ht-error {
+  background-image: linear-gradient(90deg, #dc2626 0%, #dc2626 100%) !important;
+  background-repeat: no-repeat !important;
+  background-size: 100% 2px !important;
+  background-position: 0 100% !important;
+  background-origin: padding-box !important;
+  background-clip: border-box !important;
+  animation: none !important;
+}
+
+/* The bilingual mode's added translation. A span so it is valid inside a p, a td or an li alike,
+   given its own line here rather than by the tag it uses.
+   The resets matter: this lands inside arbitrary page markup. A flex or grid parent would otherwise
+   lay it out beside the original rather than under it, and an inherited nowrap, line clamp or fixed
+   height would clip it out of sight entirely. */
+.ht-bilingual {
+  display: block !important;
+  width: 100% !important;
+  flex: 0 0 100% !important;
+  grid-column: 1 / -1 !important;
+  box-sizing: border-box !important;
+  margin: 0.35em 0 0 0 !important;
+  padding: 0 0 0 0.5em !important;
+  border-left: 2px solid rgba(14, 165, 233, 0.6) !important;
+
+  white-space: normal !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  -webkit-line-clamp: none !important;
+  max-height: none !important;
+  height: auto !important;
+  max-width: none !important;
+  min-width: 0 !important;
+  float: none !important;
+  position: static !important;
+  visibility: visible !important;
+  clip-path: none !important;
+  text-indent: 0 !important;
+
+  font-size: 1em !important;
+  font-style: normal !important;
+  line-height: 1.45 !important;
+  text-align: start !important;
+  opacity: 0.95 !important;
+}
+
+/* Markers for the replace modes. Every one is layout-neutral on purpose: an outline is painted
+   outside the box and a text decoration inside the line box, so neither reflows anything. */
+.ht-mark-outline {
+  outline: 1px solid rgba(14, 165, 233, 0.55) !important;
+  outline-offset: 1px !important;
+}
+
+.ht-mark-underline {
+  text-decoration-line: underline !important;
+  text-decoration-style: solid !important;
+  text-decoration-color: rgba(14, 165, 233, 0.6) !important;
+  text-decoration-thickness: 1px !important;
+  text-underline-offset: 2px !important;
+  text-decoration-skip-ink: none !important;
+}
+
+.ht-mark-dashed {
+  text-decoration-line: underline !important;
+  text-decoration-style: dashed !important;
+  text-decoration-color: rgba(14, 165, 233, 0.6) !important;
+  text-decoration-thickness: 1px !important;
+  text-underline-offset: 2px !important;
+  text-decoration-skip-ink: none !important;
+}

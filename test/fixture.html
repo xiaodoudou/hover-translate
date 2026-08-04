@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="mul">
+<head>
+<meta charset="utf-8">
+<title>Hover Translate test fixture</title>
+<style>
+  body { font: 16px/1.7 system-ui, sans-serif; max-width: 46rem; margin: 2rem auto; padding: 0 1rem; }
+  h2 { margin-top: 2.5rem; font-size: 1rem; letter-spacing: .08em; text-transform: uppercase; color: #64748b; }
+  section { border-left: 3px solid #e2e8f0; padding-left: 1rem; }
+  code { background: #f1f5f9; padding: .1em .35em; border-radius: 3px; font-size: .9em; }
+  pre { background: #0f172a; color: #e2e8f0; padding: 1rem; border-radius: 6px; overflow-x: auto; }
+  table { border-collapse: collapse; }
+  td, th { border: 1px solid #cbd5e1; padding: .4rem .7rem; }
+  .expect { color: #059669; font-size: .85em; }
+  .expect-not { color: #dc2626; font-size: .85em; }
+  .price { color: #dc2626; font-weight: 700; }
+  .create-time { font-weight: 700; }
+  .flexy { display: flex; gap: .5rem; align-items: center; }
+  .clipped { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 22rem; }
+</style>
+</head>
+<body>
+
+<h1>Hover Translate test fixture</h1>
+<p>Hover any paragraph below and hold <kbd>Ctrl</kbd>. Green notes say what should happen, red notes mark
+things that must stay untouched.</p>
+
+<h2>Plain paragraphs, one per language</h2>
+<section>
+  <p lang="zh-CN">这是一段简体中文的测试文字。它应该被整段替换成英文，而不是逐字翻译。</p>
+  <p lang="ja">これは日本語のテスト用の段落です。マウスを乗せて Ctrl を押すと、英語に置き換わるはずです。</p>
+  <p lang="ru">Это тестовый абзац на русском языке. Он должен целиком превратиться в английский текст.</p>
+  <p lang="ar" dir="rtl">هذه فقرة اختبارية باللغة العربية. يجب أن تتحول بالكامل إلى نص إنجليزي.</p>
+  <p lang="de">Dies ist ein deutscher Testabsatz. Er sollte vollständig durch englischen Text ersetzt werden.</p>
+  <p lang="ko">이것은 한국어 테스트 문단입니다. 마우스를 올리고 Ctrl 키를 누르면 영어로 바뀌어야 합니다.</p>
+</section>
+
+<h2>Inline markup inside a paragraph</h2>
+<section>
+  <p lang="fr">Le chat dort sur le <a href="https://example.com">canapé rouge</a> depuis ce matin, et
+  personne ne <strong>ose</strong> le déranger.</p>
+  <p class="expect">The link must survive, still point at example.com, and its own text must be translated too.</p>
+
+  <p class="expect">The short <code>&lt;strong&gt;</code> is folded into the sentence for context, so it
+  loses its bold. A long inline run keeps its markup:</p>
+
+  <p lang="de">Der Bericht beschreibt <em>eine ausführliche Untersuchung der Ursachen</em> und schlägt
+  konkrete Maßnahmen vor.</p>
+
+  <p lang="es">Para instalar el paquete ejecuta <code>npm install --save-dev vite</code> en la carpeta del
+  proyecto, y luego reinicia el servidor.</p>
+  <p class="expect-not">The code span must come back byte for byte, in the right position.</p>
+
+  <p lang="it">Ecco il nostro logo <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16'%3E%3Ccircle cx='8' cy='8' r='7' fill='%230ea5e9'/%3E%3C/svg%3E" alt="logo" width="16" height="16"> e accanto una nota<sup>1</sup> a piè di pagina.</p>
+  <p class="expect-not">Image and superscript survive intact.</p>
+
+  <p lang="zh-CN">价格 <span class="price">¥199</span> 起，支持全国联保服务。</p>
+  <p class="expect">The span is short but carries a class, so it keeps its element and stays red.
+  Only bare formatting tags get folded into the sentence.</p>
+
+  <p lang="fr">Consultez la <a href="https://example.com"><span class="price">documentation</span></a>
+  pour les détails.</p>
+  <p class="expect">A wrapper chain keeps its inner span: the text is written into the deepest element.</p>
+</section>
+
+<h2>Mixed script, where language detectors get it wrong</h2>
+<section>
+  <p lang="zh-CN">奥丁2掌机Odin2游戏机专用DOCK充电扩展坞支持4K60帧输出金属外壳</p>
+  <p lang="zh-CN">2026-07-18订单号: 3312870351913019697</p>
+  <p lang="zh-CN" id="split-title"><span class="price">奥丁2掌机</span> Odin2 DOCK 4K60
+  <span class="price">专用充电扩展坞</span></p>
+  <p class="expect">The last one is the nastiest: the Chinese sits inside styled spans, so the string
+  that carries the sentence is nothing but placeholders and brand names. Google detects that one as
+  "no". Judging the block by it alone is what made whole blocks vanish into "already English".</p>
+  <p class="expect">Mostly Latin letters and digits, but the Han characters settle it: this is not
+  English. Chrome's on-device detector says "en" for both. They must translate, not be skipped.</p>
+</section>
+
+<h2>Nested span, so hovering the child must select the paragraph</h2>
+<section>
+  <p lang="pt"><span><span>Todo o texto deste parágrafo está dentro de dois spans aninhados.</span></span></p>
+  <p class="expect">Pointing at the inner text should still translate the whole paragraph exactly once.</p>
+</section>
+
+<h2>Lists and tables</h2>
+<section>
+  <ul>
+    <li lang="nl">Eerste punt van de lijst, met een paar woorden erbij.</li>
+    <li lang="nl">Tweede punt, dat los van het eerste vertaald moet worden.</li>
+  </ul>
+  <p class="expect">Each list item is its own block. Hovering one must not touch its sibling.</p>
+
+  <table>
+    <tr><th lang="pl">Nazwa</th><th lang="pl">Opis</th></tr>
+    <tr><td lang="pl">Kabel</td><td lang="pl">Łączy urządzenie z zasilaniem.</td></tr>
+  </table>
+  <p class="expect">Cells translate one at a time, and the table layout does not shift.</p>
+</section>
+
+<h2>Real world: an order row from a shopping site</h2>
+<section>
+  <table>
+    <tr>
+      <td id="order-cell" class="head-info-cell"><label class="checkbox-label"><span class="checkbox"><input type="checkbox" disabled></span><span class="create-time">2026-07-23</span></label><span><span>订单号</span><span>: </span><span data-spm-anchor-id="a1z09.2.0.i0">3313704182876019697</span></span></td>
+    </tr>
+  </table>
+  <p class="expect">Every tag has to survive: the disabled checkbox, and the date keeping its bold
+  create-time span. Only the text changes, each piece inside its own element.</p>
+</section>
+
+<h2>Hostile layouts for the bilingual mode</h2>
+<section>
+  <p id="flex-block" class="flexy" lang="zh-CN"><span>价格</span><span>199元起，全国联保</span></p>
+  <p id="clipped-block" class="clipped" lang="zh-CN">这一行设置了不换行和溢出隐藏，翻译文本必须仍然可读。</p>
+  <p class="expect">A flex parent would lay the added line out beside the text, and a nowrap and
+  overflow-hidden parent would clip it away. In both cases the translation has to end up on its own
+  readable line below the original.</p>
+</section>
+
+<h2>Things that must never be touched</h2>
+<section>
+  <pre><code lang="zh-CN">// 这段代码在 pre 里面，绝对不能被翻译
+const total = items.reduce((a, b) =&gt; a + b, 0);</code></pre>
+  <p class="expect-not">A pre block is excluded outright: Ctrl over it does nothing.</p>
+
+  <p><i class="fa fa-star" aria-hidden="true">★</i> <span aria-hidden="true">▲▼</span></p>
+  <p class="expect-not">Icon fonts and aria-hidden decoration are excluded.</p>
+
+  <p class="notranslate" lang="de">Dieser Absatz trägt die Klasse notranslate.</p>
+  <p class="expect-not">notranslate and translate="no" are honoured.</p>
+
+  <textarea rows="2" cols="40" lang="de">Text in einem Textfeld bleibt unverändert.</textarea>
+  <p class="expect-not">Form fields are never rewritten.</p>
+</section>
+
+<h2>Already English, and very long</h2>
+<section>
+  <p lang="en">This paragraph is already in English and should be detected as such, then left alone.</p>
+  <p lang="sv">Ett mycket kort stycke.</p>
+  <p class="expect">Short text still works. Same-language text is skipped with a notice.</p>
+</section>
+
+</body>
+</html>

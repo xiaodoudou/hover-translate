@@ -1,0 +1,261 @@
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #0f172a;
+  --muted: #64748b;
+  --line: #e2e8f0;
+  --card: #f8fafc;
+  --accent: #0e7490;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f172a;
+    --fg: #e2e8f0;
+    --muted: #94a3b8;
+    --line: #1e293b;
+    --card: #1e293b;
+    --accent: #38bdf8;
+  }
+}
+
+body {
+  box-sizing: border-box;
+  width: 320px;
+  margin: 0;
+  padding: 12px;
+  background: var(--bg);
+  color: var(--fg);
+  font: 13px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+h2 {
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.steps {
+  margin: 0;
+  line-height: 1.5;
+}
+
+#stat-last {
+  display: block;
+  text-align: left;
+  font-size: 12px;
+}
+
+.hint {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.hint.italic {
+  font-style: italic;
+}
+
+kbd {
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  padding: 0 4px;
+  font: inherit;
+  font-size: 11px;
+}
+
+.card {
+  margin-top: 10px;
+  padding: 9px 10px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 0;
+}
+
+.row span {
+  color: var(--muted);
+  flex: none;
+  white-space: nowrap;
+}
+
+/* One line, always: the label never shrinks and a long status is clipped rather than wrapped.
+   The full text stays available as the title. */
+.row b {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ok {
+  color: #15803d;
+}
+
+.warn {
+  color: #b45309;
+}
+
+.bad {
+  color: #b91c1c;
+}
+
+label {
+  display: block;
+  margin: 8px 0 3px;
+  font-weight: 600;
+}
+
+label:first-child {
+  margin-top: 0;
+}
+
+.split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  align-items: end;
+}
+
+.split > div > label {
+  margin-top: 8px;
+}
+
+label.check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+select,
+input[type="range"],
+button {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+}
+
+select,
+button {
+  padding: 5px 6px;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+button {
+  width: auto;
+  padding: 5px 12px;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.inline {
+  display: flex;
+  gap: 6px;
+}
+
+.inline.end {
+  justify-content: flex-end;
+  margin-top: 6px;
+}
+
+button.small {
+  padding: 3px 8px;
+  font-size: 11.5px;
+}
+
+.providers {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.providers li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-top: 1px solid var(--line);
+}
+
+.providers li:first-child {
+  border-top: 0;
+}
+
+.providers input[type="checkbox"] {
+  margin: 0;
+  flex: none;
+}
+
+.providers .rank {
+  width: 10px;
+  flex: none;
+  color: var(--muted);
+  font-size: 11px;
+  text-align: right;
+}
+
+.providers .provider-name {
+  font-weight: 600;
+}
+
+.providers .provider-name.off {
+  color: var(--muted);
+  font-weight: 400;
+  text-decoration: line-through;
+}
+
+.providers small {
+  flex: 1;
+  color: var(--muted);
+  font-size: 11px;
+  text-align: right;
+}
+
+.providers button {
+  flex: none;
+  width: 22px;
+  padding: 1px 0;
+  line-height: 1.1;
+  background: var(--bg);
+  color: var(--fg);
+  border-color: var(--line);
+}
+
+progress {
+  width: 100%;
+  margin-top: 8px;
+}
+
+output {
+  font-weight: 400;
+  color: var(--muted);
+}

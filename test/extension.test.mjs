@@ -1,0 +1,584 @@
+// The only test that exercises the extension as Chrome actually runs it: a real unpacked install,
+// real content script injection, real mouse and keyboard input.
+//
+//   node test/extension.test.mjs
+//
+// It serves the folder, launches its own headless Chrome with a throwaway profile and cleans up.
+// Headless matters: with a visible window, CDP key events are dropped unless the OS focus is on it.
+
+import { createServer } from "node:http";
+import { readFile, rm, mkdtemp } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { dirname, resolve, extname, join } from "node:path";
+import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
+
+const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+// EXT_PATH points the install at an unpacked copy of the shipping ZIP, so the same assertions can
+// be run against the artifact that actually goes to the store rather than the source tree.
+const extPath = process.env.EXT_PATH ? resolve(process.env.EXT_PATH) : root;
+const PORT = 8741;
+const CDP_PORT = 9444;
+
+let failures = 0;
+const check = (name, ok, detail = "") => {
+  console.log(`  ${ok ? "ok  " : "FAIL"} ${name}${ok ? "" : "  <- " + detail}`);
+  if (!ok) failures++;
+};
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// --- static server ------------------------------------------------------
+const MIME = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".json": "application/json", ".png": "image/png" };
+const server = createServer(async (req, res) => {
+  try {
+    const file = join(root, decodeURIComponent(req.url.split("?")[0]));
+    const body = await readFile(file);
+    res.writeHead(200, { "content-type": MIME[extname(file)] || "application/octet-stream" });
+    res.end(body);
+  } catch {
+    res.writeHead(404).end("not found");
+  }
+});
+await new Promise((r) => server.listen(PORT, "127.0.0.1", r));
+
+// --- chrome -------------------------------------------------------------
+function findChrome() {
+  const candidates = [
+    process.env.CHROME_PATH,
+    `${process.env.ProgramFiles}\\Google\\Chrome\\Application\\chrome.exe`,
+    `${process.env["ProgramFiles(x86)"]}\\Google\\Chrome\\Application\\chrome.exe`,
+    `${process.env.LOCALAPPDATA}\\Google\\Chrome\\Application\\chrome.exe`,
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "/usr/bin/google-chrome",
+  ].filter(Boolean);
+  const found = candidates.find((p) => existsSync(p));
+  if (!found) throw new Error("Chrome not found; set CHROME_PATH");
+  return found;
+}
+
+const profile = await mkdtemp(join(tmpdir(), "ht-chrome-"));
+const chrome = spawn(findChrome(), [
+  "--headless=new", `--user-data-dir=${profile}`, "--enable-unsafe-extension-debugging",
+  `--remote-debugging-port=${CDP_PORT}`, "--no-first-run", "--no-default-browser-check",
+  "--disable-sync", "--window-size=1200,900", "about:blank",
+], { stdio: "ignore" });
+
+async function cleanup(code) {
+  chrome.kill();
+  server.close();
+  await sleep(400);
+  await rm(profile, { recursive: true, force: true }).catch(() => {});
+  process.exit(code);
+}
+
+for (let i = 0; i < 40; i++) {
+  await sleep(500);
+  try { await (await fetch(`http://127.0.0.1:${CDP_PORT}/json/version`)).json(); break; } catch {}
+}
+
+// --- CDP plumbing -------------------------------------------------------
+function attach(wsUrl) {
+  let nextId = 1;
+  const pending = new Map();
+  const contexts = [];
+  const logs = [];
+  const ws = new WebSocket(wsUrl);
+  ws.addEventListener("message", (e) => {
+    const m = JSON.parse(e.data);
+    if (m.id && pending.has(m.id)) { pending.get(m.id)(m); pending.delete(m.id); }
+    if (m.method === "Runtime.executionContextCreated") contexts.push(m.params.context);
+    if (m.method === "Runtime.consoleAPICalled")
+      logs.push(`[${m.params.type}] ` + m.params.args.map((a) => a.value ?? a.description ?? a.type).join(" ").slice(0, 300));
+    if (m.method === "Runtime.exceptionThrown")
+      logs.push("[exception] " + (m.params.exceptionDetails?.exception?.description || m.params.exceptionDetails?.text || "").slice(0, 400));
+  });
+  const ready = new Promise((r) => ws.addEventListener("open", r));
+  const send = (method, params = {}) =>
+    new Promise((res, rej) => {
+      const id = nextId++;
+      pending.set(id, (m) => (m.error ? rej(new Error(method + " " + m.error.message)) : res(m.result)));
+      ws.send(JSON.stringify({ id, method, params }));
+    });
+  return { send, ready, contexts, logs };
+}
+
+try {
+  const version = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json/version`)).json();
+  console.log(version.Browser);
+
+  const browser = attach(version.webSocketDebuggerUrl);
+  await browser.ready;
+  const install = await browser.send("Extensions.loadUnpacked", { path: extPath });
+  const EXT_ID = install.id;
+  console.log(`installed as ${EXT_ID}\n`);
+  check("extension installed", !!EXT_ID);
+
+  const created = await (await fetch(
+    `http://127.0.0.1:${CDP_PORT}/json/new?http://127.0.0.1:${PORT}/test/fixture.html`,
+    { method: "PUT" },
+  )).json();
+  await sleep(1200);
+
+  const page = attach(created.webSocketDebuggerUrl);
+  await page.ready;
+  await page.send("Runtime.enable");
+  await page.send("Page.enable");
+  await page.send("Page.reload");
+  await sleep(2500);
+
+  const ctx = page.contexts.filter((c) => c.origin === `chrome-extension://${EXT_ID}`).pop();
+  check("content script injected into its own isolated world", !!ctx, "content script never ran");
+  if (!ctx) await cleanup(1);
+
+  const ev = async (expression) => {
+    const r = await page.send("Runtime.evaluate", { contextId: ctx.id, expression, awaitPromise: true, returnByValue: true });
+    if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || r.exceptionDetails.text);
+    return r.result.value;
+  };
+
+  check("loader ran", (await ev("window.__hoverTranslateLoaded")) === true);
+  check("extension APIs reachable from the content script", (await ev("typeof chrome?.storage?.local")) === "object");
+
+  const SEL = {
+    zh: `[...document.querySelectorAll('p')].find(e => e.getAttribute('lang') === 'zh-CN')`,
+    es: `[...document.querySelectorAll('p')].find(e => e.getAttribute('lang') === 'es')`,
+    fr: `[...document.querySelectorAll('p')].find(e => e.getAttribute('lang') === 'fr')`,
+    it: `[...document.querySelectorAll('p')].find(e => e.getAttribute('lang') === 'it')`,
+    en: `[...document.querySelectorAll('p')].find(e => e.getAttribute('lang') === 'en')`,
+    pre: `document.querySelector('pre code')`,
+    // Tagged up front: their text is what gets translated, so a text-based selector stops matching.
+    mixed: `document.querySelector('[data-test="mixed"]')`,
+    order: `document.querySelector('[data-test="order"]')`,
+    price: `[...document.querySelectorAll('p')].find(e => e.getAttribute('lang') === 'zh-CN' && e.querySelector('span.price'))`,
+    wrapped: `[...document.querySelectorAll('p')].find(e => e.querySelector('a > span.price'))`,
+    cell: `document.getElementById('order-cell')`,
+    ja: `[...document.querySelectorAll('p')].find(e => e.getAttribute('lang') === 'ja')`,
+    ru: `[...document.querySelectorAll('p')].find(e => e.getAttribute('lang') === 'ru')`,
+    ko: `[...document.querySelectorAll('p')].find(e => e.getAttribute('lang') === 'ko')`,
+    flex: `document.getElementById('flex-block')`,
+    clipped: `document.getElementById('clipped-block')`,
+    de: `[...document.querySelectorAll('p')].find(e => e.getAttribute('lang') === 'de' && !e.classList.contains('notranslate'))`,
+  };
+
+  // A tap, not a hold: press and release straight away, which is how people actually use it.
+  // `aim` is where the pointer goes when the block's left edge holds something excluded, such as the
+  // checkbox in the order cell: hovering that refuses, exactly as it should.
+  async function ctrlTap(expr, settleMs = 15000, aim = expr) {
+    const rect = await ev(`(() => { const el = ${aim}; if (!el) return null;
+      el.scrollIntoView({block:'center'});
+      const r = el.getBoundingClientRect();
+      return {x: Math.round(r.left + Math.min(40, r.width/2)), y: Math.round(r.top + r.height/2)}; })()`);
+    if (!rect) throw new Error("not found: " + expr);
+    const was = await ev(`(${expr}).hasAttribute('data-ht-state')`);
+    await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: rect.x, y: rect.y, button: "none" });
+    await sleep(80);
+    const key = { key: "Control", code: "ControlLeft", windowsVirtualKeyCode: 17, nativeVirtualKeyCode: 17 };
+    await page.send("Input.dispatchKeyEvent", { type: "rawKeyDown", ...key, modifiers: 2 });
+    await sleep(40);
+    await page.send("Input.dispatchKeyEvent", { type: "keyUp", ...key });
+    const deadline = Date.now() + settleMs;
+    while (Date.now() < deadline) {
+      await sleep(150);
+      const s = await ev(`(() => { const el = ${expr};
+        return {pending: el.classList.contains('ht-pending'),
+                translated: el.hasAttribute('data-ht-state')}; })()`);
+      if (!s.pending && s.translated !== was) break;
+    }
+    await sleep(150);
+  }
+  const status = () => ev(`(async () => (await chrome.storage.local.get('status')).status)()`);
+
+  await ev(`(() => {
+    const tag = (needle, name) => {
+      const el = [...document.querySelectorAll('p')].find((e) => e.textContent.includes(needle));
+      if (el) el.setAttribute('data-test', name);
+    };
+    tag('奥丁2掌机', 'mixed');
+    tag('订单号', 'order');
+    return 'ok';
+  })()`);
+
+  // The loading state is a class, and nothing is ever appended. Watch both, so a regression that
+  // reintroduces an inserted node is caught as well as one that drops the indicator.
+  await ev(`window.__pending = 0; window.__added = 0;
+    new MutationObserver((records) => {
+      for (const r of records) {
+        if (r.type === 'attributes' && r.target.classList?.contains('ht-pending')) window.__pending++;
+        if (r.type === 'childList') window.__added += r.addedNodes.length;
+      }
+    }).observe(document.body, {attributes: true, childList: true, subtree: true, attributeFilter: ['class']});
+    'ok'`);
+
+  console.log("\ntranslate with real input events");
+  const zhBefore = await ev(`${SEL.zh}.textContent`);
+  await ctrlTap(SEL.zh);
+  const zhAfter = await ev(`${SEL.zh}.textContent`);
+  console.log("   ", JSON.stringify(zhAfter.slice(0, 72)));
+  console.log("   engine:", JSON.stringify(await status()));
+  check("text was replaced", zhAfter !== zhBefore);
+  check("no chinese left", !/[一-鿿]/.test(zhAfter));
+  check("marked translated", (await ev(`${SEL.zh}.getAttribute('data-ht-state')`)) === "translated");
+  check("pulse cleared", (await ev(`${SEL.zh}.classList.contains('ht-pending')`)) === false);
+  check("engine recorded", !!(await status())?.engine);
+
+  console.log("\nloading indicator and leftover styling");
+  check("the loading state was shown while the request was in flight", (await ev(`window.__pending`)) > 0);
+  check("no node was added to show it", (await ev(`window.__added`)) === 0, await ev(`window.__added`));
+  check("the loading class is gone afterwards",
+    (await ev(`document.querySelectorAll('.ht-pending, .ht-error').length`)) === 0);
+  check("translated text carries no underline",
+    (await ev(`getComputedStyle(${SEL.zh}).textDecorationLine`)) === "none",
+    await ev(`getComputedStyle(${SEL.zh}).textDecorationLine`));
+  check("and no leftover background of ours",
+    (await ev(`getComputedStyle(${SEL.zh}).backgroundImage`)) === "none",
+    await ev(`getComputedStyle(${SEL.zh}).backgroundImage`));
+
+  // An !important background-position would outrank the keyframes and pin the gradient off-screen,
+  // leaving a loading state that never moves. Sample the animation rather than trusting it.
+  console.log("\nthe loading gradient actually sweeps");
+  const sweep = await ev(`(() => {
+    const el = document.querySelector('p.notranslate');
+    el.classList.add('ht-pending');
+    const anim = el.getAnimations().find((a) => a.animationName === 'ht-sweep');
+    if (!anim) { el.classList.remove('ht-pending'); return null; }
+    const before = el.getBoundingClientRect().height;
+    const samples = [];
+    for (const t of [0, 0.5, 0.99]) {
+      anim.pause();
+      anim.currentTime = t * 1100;
+      samples.push(getComputedStyle(el).backgroundPosition);
+    }
+    const after = el.getBoundingClientRect().height;
+    anim.cancel();
+    el.classList.remove('ht-pending');
+    return { samples, before, after };
+  })()`);
+  console.log("   ", JSON.stringify(sweep?.samples));
+  check("the sweep animation is running", sweep !== null);
+  check("the gradient moves rather than sitting still",
+    new Set(sweep?.samples || []).size === 3, JSON.stringify(sweep?.samples));
+  check("it is painted along the bottom edge",
+    (sweep?.samples || []).every((s) => s.endsWith("100%")), JSON.stringify(sweep?.samples));
+  check("and it costs no height", sweep?.before === sweep?.after,
+    `${sweep?.before} vs ${sweep?.after}`);
+
+  console.log("\nthe loading state is held long enough to be seen");
+  await ev(`chrome.storage.sync.set({minLoadingMs: 1200})`);
+  await sleep(400);
+  const heldFrom = Date.now();
+  await ctrlTap(SEL.ja);
+  const held = Date.now() - heldFrom;
+  console.log(`    ${held}ms from trigger to translated`);
+  check("a fast translation still shows the gradient for the configured minimum", held >= 1200,
+    `${held}ms`);
+  check("the japanese paragraph did translate", (await ev(`${SEL.ja}.hasAttribute('data-ht-state')`)) === true);
+  await ctrlTap(SEL.ja, 6000); // put it back
+  await ev(`chrome.storage.sync.set({minLoadingMs: 0})`);
+  await sleep(400);
+
+  console.log("\ntapping translated text restores it");
+  await ctrlTap(SEL.zh, 6000);
+  check("original restored", (await ev(`${SEL.zh}.textContent`)) === zhBefore);
+  check("state cleared", (await ev(`${SEL.zh}.hasAttribute('data-ht-state')`)) === false);
+
+  console.log("\nmarkup survives");
+  await ctrlTap(SEL.es);
+  check("spanish translated", (await ev(`${SEL.es}.hasAttribute('data-ht-state')`)) === true);
+  check("code span byte for byte", (await ev(`${SEL.es}.querySelector('code')?.textContent`)) === "npm install --save-dev vite");
+  await ctrlTap(SEL.fr);
+  check("link href kept", (await ev(`${SEL.fr}.querySelector('a')?.getAttribute('href')`)) === "https://example.com");
+  check("link text translated", /sofa|couch/i.test(await ev(`${SEL.fr}.querySelector('a')?.textContent || ''`)),
+    await ev(`${SEL.fr}.querySelector('a')?.textContent`));
+  await ctrlTap(SEL.it);
+  check("image kept", (await ev(`!!${SEL.it}.querySelector('img')`)) === true);
+  check("superscript kept", (await ev(`${SEL.it}.querySelector('sup')?.textContent`)) === "1");
+
+  console.log("\npage styling is preserved");
+  await ctrlTap(SEL.price);
+  check("chinese price line translated", (await ev(`${SEL.price}.hasAttribute('data-ht-state')`)) === true);
+  // Providers redistribute words across the tags, so assert the span and its price, not exact wording.
+  check("the short styled span keeps its class and its price",
+    /¥199/.test((await ev(`${SEL.price}.querySelector('span.price')?.textContent`)) || ""),
+    await ev(`${SEL.price}.innerHTML`));
+  check("and keeps its colour",
+    (await ev(`getComputedStyle(${SEL.price}.querySelector('span.price')).color`)) === "rgb(220, 38, 38)");
+  await ctrlTap(SEL.wrapped);
+  check("a wrapper chain keeps its inner span",
+    (await ev(`!!${SEL.wrapped}.querySelector('a > span.price')`)) === true,
+    await ev(`${SEL.wrapped}.innerHTML`));
+
+  // The engines start a fresh sentence at every tag boundary and capitalise it. Anything capitalised
+  // mid-sentence that is not a plausible proper noun is a regression of that fix.
+  const strays = await ev(`(() => {
+    const text = ${SEL.price}.textContent;
+    return [...text.matchAll(/[a-z,;]\\s+([A-Z][a-z]+)/g)].map((m) => m[1]);
+  })()`);
+  console.log("   price line:", JSON.stringify(await ev(`${SEL.price}.textContent`)));
+  check("no stray capitals were left at the tag boundaries", strays.length === 0, JSON.stringify(strays));
+
+  console.log("\na real order row keeps every tag and every node");
+  const cellElements = await ev(`${SEL.cell}.querySelectorAll('*').length`);
+  const cellBefore = await ev(`${SEL.cell}.textContent`);
+  // An expando survives on the original node but not on a clone, so this proves node identity.
+  await ev(`[...${SEL.cell}.querySelectorAll('*')].forEach((n, i) => { n.__htId = i; }); 'ok'`);
+  await ctrlTap(SEL.cell, 15000, `${SEL.cell}.querySelector('span[data-spm-anchor-id]')`);
+  console.log("   ", JSON.stringify(await ev(`${SEL.cell}.innerHTML`)));
+  check("the cell was translated", (await ev(`${SEL.cell}.textContent`)) !== cellBefore);
+  check("no element was lost", (await ev(`${SEL.cell}.querySelectorAll('*').length`)) === cellElements,
+    `${await ev(`${SEL.cell}.querySelectorAll('*').length`)} vs ${cellElements}`);
+  check("the disabled checkbox survives",
+    (await ev(`${SEL.cell}.querySelector('input[type="checkbox"]')?.disabled`)) === true);
+  check("the date keeps its create-time span",
+    (await ev(`${SEL.cell}.querySelector('span.create-time')?.textContent`)) === "2026-07-23",
+    await ev(`${SEL.cell}.innerHTML`));
+  check("and the date is still bold",
+    (await ev(`getComputedStyle(${SEL.cell}.querySelector('span.create-time')).fontWeight`)) === "700");
+  check("the order number keeps its data attribute",
+    (await ev(`${SEL.cell}.querySelector('span[data-spm-anchor-id]')?.textContent`))?.trim() ===
+      "3313704182876019697");
+  check("the chinese label was translated",
+    /order|number/i.test(await ev(`${SEL.cell}.textContent`)), await ev(`${SEL.cell}.textContent`));
+  check("not one node was replaced: a reactive page keeps its tree",
+    (await ev(`[...${SEL.cell}.querySelectorAll('*')].every((n, i) => n.__htId === i)`)) === true,
+    await ev(`JSON.stringify([...${SEL.cell}.querySelectorAll('*')].map(n => n.__htId))`));
+
+  console.log("\nmixed script is not mistaken for english");
+  const mixedBefore = await ev(`${SEL.mixed}.textContent`);
+  await ctrlTap(SEL.mixed);
+  console.log("   ", JSON.stringify((await ev(`${SEL.mixed}.textContent`)).slice(0, 76)));
+  console.log("   ", JSON.stringify(await status()));
+  check("chinese padded with latin brand names is translated",
+    (await ev(`${SEL.mixed}.textContent`)) !== mixedBefore);
+  check("it was not skipped as already english", (await status())?.engine !== "skipped", JSON.stringify(await status()));
+
+  // The regression that started this: Chinese inside styled spans leaves a main string of nothing
+  // but placeholders and brand names, which the endpoint detects as "no". The block used to be
+  // skipped as "already English" on the strength of that one result.
+  const splitBefore = await ev(`document.getElementById('split-title').textContent`);
+  await ctrlTap(`document.getElementById('split-title')`);
+  console.log("   ", JSON.stringify(await ev(`document.getElementById('split-title').textContent`)));
+  console.log("   ", JSON.stringify(await status()));
+  check("a block whose main string is latin-only still translates",
+    (await ev(`document.getElementById('split-title').textContent`)) !== splitBefore);
+  check("it was not skipped", (await status())?.engine !== "skipped", JSON.stringify(await status()));
+  check("its styled spans survived",
+    (await ev(`document.getElementById('split-title').querySelectorAll('span.price').length`)) === 2);
+
+  const orderBefore = await ev(`${SEL.order}.textContent`);
+  await ctrlTap(SEL.order);
+  console.log("   ", JSON.stringify(await ev(`${SEL.order}.textContent`)));
+  check("a date and order number with han is translated",
+    (await ev(`${SEL.order}.textContent`)) !== orderBefore);
+  check("and was not skipped either", (await status())?.engine !== "skipped", JSON.stringify(await status()));
+
+  console.log("\nskips and exclusions");
+  const preBefore = await ev(`${SEL.pre}.textContent`);
+  await ctrlTap(SEL.pre, 2000).catch(() => {});
+  check("pre untouched", (await ev(`${SEL.pre}.textContent`)) === preBefore);
+  const enBefore = await ev(`${SEL.en}.textContent`);
+  await ctrlTap(SEL.en, 8000);
+  check("english left alone", (await ev(`${SEL.en}.textContent`)) === enBefore);
+  check("english reported as skipped", (await status())?.engine === "skipped", JSON.stringify(await status()));
+
+  console.log("\nescape restores the page");
+  const esc = { key: "Escape", code: "Escape", windowsVirtualKeyCode: 27, nativeVirtualKeyCode: 27 };
+  await page.send("Input.dispatchKeyEvent", { type: "rawKeyDown", ...esc });
+  await page.send("Input.dispatchKeyEvent", { type: "keyUp", ...esc });
+  await sleep(500);
+  check("nothing translated remains", (await ev(`document.querySelectorAll('[data-ht-state]').length`)) === 0);
+  check("code element restored", (await ev(`${SEL.es}.querySelector('code')?.textContent`)) === "npm install --save-dev vite");
+  check("image restored", (await ev(`!!${SEL.it}.querySelector('img')`)) === true);
+  check("french reads french again", (await ev(`${SEL.fr}.textContent`)).includes("canapé rouge"));
+
+  console.log("\nctrl+c is not hijacked");
+  for (const e of [
+    { type: "rawKeyDown", key: "Control", code: "ControlLeft", windowsVirtualKeyCode: 17, nativeVirtualKeyCode: 17, modifiers: 2 },
+    { type: "rawKeyDown", key: "c", code: "KeyC", windowsVirtualKeyCode: 67, nativeVirtualKeyCode: 67, modifiers: 2 },
+    { type: "keyUp", key: "c", code: "KeyC", windowsVirtualKeyCode: 67, nativeVirtualKeyCode: 67, modifiers: 2 },
+    { type: "keyUp", key: "Control", code: "ControlLeft", windowsVirtualKeyCode: 17, nativeVirtualKeyCode: 17 },
+  ]) await page.send("Input.dispatchKeyEvent", e);
+  await sleep(1500);
+  check("no translation fired", (await ev(`document.querySelectorAll('[data-ht-state]').length`)) === 0);
+
+  // --- every provider, driven through the real extension ----------------
+  console.log("\neach provider serves a real page");
+  const TAGGED = "<b0>这是一段</b0>简体中文的<b1>测试文字</b1>。";
+  for (const provider of ["google", "tencent", "mymemory"]) {
+    const out = await ev(`(async () => await chrome.runtime.sendMessage(
+      {type: 'translate', texts: [${JSON.stringify(TAGGED)}], targetLang: 'en',
+       order: [${JSON.stringify(provider)}]}))()`);
+    console.log(`    ${provider}: ${JSON.stringify(out?.texts?.[0] ?? out)}`);
+    check(`${provider} answered through the background worker`, out?.engine === provider, JSON.stringify(out));
+    check(`${provider} kept both tag pairs`,
+      /<b0>[\s\S]*<\/b0>/.test(out?.texts?.[0] || "") && /<b1>[\s\S]*<\/b1>/.test(out?.texts?.[0] || ""),
+      out?.texts?.[0]);
+  }
+
+  console.log("\nthe provider chosen in the popup is the one used");
+  await ev(`chrome.storage.sync.set({providerOrder: ['tencent']})`);
+  await sleep(600);
+  await ctrlTap(SEL.ko);
+  console.log("   ", JSON.stringify(await ev(`${SEL.ko}.textContent`)));
+  check("the korean paragraph translated", (await ev(`${SEL.ko}.hasAttribute('data-ht-state')`)) === true);
+  check("and tencent served it", (await status())?.engine === "tencent", JSON.stringify(await status()));
+  await ctrlTap(SEL.ko, 6000); // leave it untranslated for the display-mode checks below
+  await ev(`chrome.storage.sync.set({providerOrder: ['google','tencent','mymemory']})`);
+  await sleep(600);
+
+  console.log("\nthe reported duration is the provider's own round trip");
+  const timing = await status();
+  console.log("   ", JSON.stringify(timing));
+  check("a duration was recorded", typeof timing?.ms === "number", JSON.stringify(timing));
+  check("and it is a plausible round trip", timing?.ms > 0 && timing?.ms < 15000, String(timing?.ms));
+
+  // --- display modes ----------------------------------------------------
+  console.log("\nthe marker modes are visual only and cost no layout");
+  for (const [mode, cls, expect] of [
+    ["outlined", "ht-mark-outline", "outline"],
+    ["underlined", "ht-mark-underline", "solid"],
+    ["dashed", "ht-mark-dashed", "dashed"],
+  ]) {
+    await ev(`chrome.storage.sync.set({displayMode: ${JSON.stringify(mode)}})`);
+    await sleep(500);
+    const before = await ev(`(() => { const r = ${SEL.de}.getBoundingClientRect();
+      return {w: Math.round(r.width), h: Math.round(r.height)}; })()`);
+    await ctrlTap(SEL.de);
+    const after = await ev(`(() => { const el = ${SEL.de}; const r = el.getBoundingClientRect();
+      const s = getComputedStyle(el);
+      return {w: Math.round(r.width), h: Math.round(r.height),
+              marked: el.classList.contains(${JSON.stringify(cls)}),
+              outline: s.outlineStyle, decoration: s.textDecorationStyle,
+              line: s.textDecorationLine}; })()`);
+    console.log(`   ${mode}:`, JSON.stringify(after));
+    check(`${mode}: the block carries its marker class`, after.marked, JSON.stringify(after));
+    check(`${mode}: the marker is actually painted`,
+      expect === "outline" ? after.outline === "solid"
+        : after.line === "underline" && after.decoration === expect, JSON.stringify(after));
+    check(`${mode}: the box did not change size`,
+      after.w === before.w && after.h === before.h,
+      `${JSON.stringify(before)} vs ${JSON.stringify(after)}`);
+    await ctrlTap(SEL.de, 6000);
+    check(`${mode}: reverting clears the marker`,
+      (await ev(`${SEL.de}.classList.contains(${JSON.stringify(cls)})`)) === false);
+  }
+  await ev(`chrome.storage.sync.set({displayMode: 'replace'})`);
+  await sleep(500);
+
+  console.log("\nbilingual mode keeps the original and adds the translation");
+  await ev(`chrome.storage.sync.set({displayMode: 'both'})`);
+  await sleep(600);
+  // The order cell is the harsh case: an id, a form control and several styled spans. Cloning the
+  // subtree to show both languages would duplicate every one of them.
+  await ctrlTap(SEL.cell, 15000, `${SEL.cell}.querySelector('span[data-spm-anchor-id]')`);
+  check("bilingual adds exactly one node",
+    (await ev(`${SEL.cell}.querySelectorAll('[data-ht-ui]').length`)) === 1,
+    await ev(`${SEL.cell}.innerHTML`));
+  check("and clones no element at all",
+    (await ev(`${SEL.cell}.querySelectorAll('input').length`)) === 1 &&
+      (await ev(`${SEL.cell}.querySelectorAll('span.create-time').length`)) === 1,
+    await ev(`${SEL.cell}.innerHTML`));
+  check("the original cell text is untouched",
+    (await ev(`${SEL.cell}.querySelector('span.create-time').textContent`)) === "2026-07-23");
+  check("the translation was added as text",
+    /order/i.test(await ev(`${SEL.cell}.querySelector('[data-ht-ui]').textContent`)),
+    await ev(`${SEL.cell}.querySelector('[data-ht-ui]')?.textContent`));
+  await ctrlTap(SEL.cell, 6000, `${SEL.cell}.querySelector('span[data-spm-anchor-id]')`);
+  check("reverting removes it again",
+    (await ev(`${SEL.cell}.querySelectorAll('[data-ht-ui]').length`)) === 0);
+
+  // A flex parent would put the added line beside the original, and a nowrap plus overflow-hidden
+  // parent would clip it out of sight. Both have to end up readable on their own line.
+  for (const [name, sel] of [["flex", SEL.flex], ["clipped", SEL.clipped]]) {
+    await ctrlTap(sel);
+    const box = await ev(`(() => {
+      // A flex or grid block gets its line placed after it rather than inside it.
+      const holder = ${sel}.querySelector('[data-ht-ui]')
+        || (${sel}.nextElementSibling?.hasAttribute('data-ht-ui') ? ${sel}.nextElementSibling : null);
+      if (!holder) return null;
+      const h = holder.getBoundingClientRect();
+      // Measure the last original node, not the block: the block's own rect has already grown to
+      // include the line we are trying to check, which would make the comparison circular.
+      const prev = holder.parentElement === ${sel} ? holder.previousSibling : ${sel};
+      let last;
+      if (prev && prev.nodeType === 1) last = prev.getBoundingClientRect();
+      else {
+        const range = document.createRange();
+        range.selectNodeContents(prev ?? ${sel});
+        last = range.getBoundingClientRect();
+      }
+      const style = getComputedStyle(holder);
+      return { top: Math.round(h.top), left: Math.round(h.left), width: Math.round(h.width),
+               height: Math.round(h.height), originalBottom: Math.round(last.bottom),
+               blockLeft: Math.round(${sel}.getBoundingClientRect().left),
+               text: holder.textContent.trim(), whiteSpace: style.whiteSpace,
+               overflow: style.overflow, visibility: style.visibility };
+    })()`);
+    console.log(`   ${name}:`, JSON.stringify(box));
+    check(`${name} parent: the translation exists`, !!box?.text, JSON.stringify(box));
+    check(`${name} parent: it sits below the original, not beside it`,
+      box && box.top >= box.originalBottom - 2, JSON.stringify(box));
+    check(`${name} parent: it starts at the block's left edge`,
+      box && Math.abs(box.left - box.blockLeft) <= 4, JSON.stringify(box));
+    check(`${name} parent: it has real height so it is visible`, box && box.height > 0, JSON.stringify(box));
+    check(`${name} parent: it is not clipped to one nowrap line`,
+      box && box.whiteSpace === "normal" && box.overflow === "visible", JSON.stringify(box));
+    await ctrlTap(sel, 6000);
+  }
+
+  const ruBefore = await ev(`${SEL.ru}.textContent`);
+  await ctrlTap(SEL.ru);
+  const ruAfter = await ev(`${SEL.ru}.textContent`);
+  console.log("   ", JSON.stringify(ruAfter.slice(0, 120)));
+  check("the original russian is still there", ruAfter.startsWith(ruBefore),
+    JSON.stringify(ruAfter.slice(0, 60)));
+  check("and an english translation was added after it",
+    /test|paragraph/i.test(ruAfter.slice(ruBefore.length)),
+    JSON.stringify(ruAfter.slice(ruBefore.length, ruBefore.length + 90)));
+  await ctrlTap(SEL.ru, 6000);
+  check("reverting removes the added translation", (await ev(`${SEL.ru}.textContent`)) === ruBefore,
+    JSON.stringify(await ev(`${SEL.ru}.textContent`)));
+
+  console.log("\nbubble mode leaves the page completely alone");
+  await ev(`chrome.storage.sync.set({displayMode: 'bubble'})`);
+  await sleep(600);
+  const koBefore = await ev(`${SEL.ko}.textContent`);
+  const nodesBefore = await ev(`document.querySelectorAll('*').length`);
+  await ctrlTap(SEL.ko);
+  check("the korean paragraph is untouched", (await ev(`${SEL.ko}.textContent`)) === koBefore);
+  check("a bubble appeared outside the block",
+    (await ev(`document.querySelectorAll('body > [data-ht-ui]').length`)) === 1);
+  check("and nothing else was added to the page",
+    (await ev(`document.querySelectorAll('*').length`)) === nodesBefore + 1,
+    `${await ev(`document.querySelectorAll('*').length`)} vs ${nodesBefore}`);
+  // Dismissal is armed on a delay, so the pointer sitting still on the block does not kill it.
+  await sleep(400);
+  const spot = await ev(`(() => { const r = ${SEL.ko}.getBoundingClientRect();
+    return {x: Math.round(r.left + 200), y: Math.round(r.top + 4)}; })()`);
+  await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: spot.x, y: spot.y, button: "none" });
+  await sleep(250);
+  check("moving the mouse dismisses the bubble",
+    (await ev(`document.querySelectorAll('body > [data-ht-ui]').length`)) === 0);
+  check("and the page is still untouched afterwards", (await ev(`${SEL.ko}.textContent`)) === koBefore);
+  check("the block was never marked, so no trigger is wasted on stale state",
+    (await ev(`${SEL.ko}.hasAttribute('data-ht-state')`)) === false);
+
+  // The bug this guards: the block used to stay marked after the bubble went, so the next trigger
+  // was spent reverting something already gone and the bubble only came back on the second press.
+  await ctrlTap(SEL.ko);
+  check("triggering again brings the bubble straight back, first press",
+    (await ev(`document.querySelectorAll('body > [data-ht-ui]').length`)) === 1);
+  await ev(`document.querySelectorAll('body > [data-ht-ui]').forEach((n) => n.remove())`);
+  await ev(`chrome.storage.sync.set({displayMode: 'replace'})`);
+  await sleep(600);
+
+  console.log("\nconsole cleanliness");
+  const errors = page.logs.filter((l) => /exception|\[error\]/i.test(l));
+  check("no errors from the page or content script", errors.length === 0, errors.join(" | "));
+
+  console.log(failures === 0 ? "\nALL PASS" : `\n${failures} FAILURE(S)`);
+  await cleanup(failures === 0 ? 0 : 1);
+} catch (error) {
+  console.error("\nharness error:", error);
+  await cleanup(1);
+}

@@ -1,0 +1,69 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <section class="card">
+    <h2>How to use</h2>
+    <p class="steps">
+      Point at text, tap <kbd id="key-hint">Ctrl</kbd>.<br>
+      Tap <kbd class="key-hint">Ctrl</kbd> again to restore.<br>
+      Tap <kbd>Esc</kbd> to restore the page.
+    </p>
+  </section>
+
+  <section class="card">
+    <h2>Last translation stats</h2>
+    <b id="stat-last">Nothing yet</b>
+  </section>
+
+  <section class="card">
+    <h2>Configuration</h2>
+
+    <label for="target">Translate into</label>
+    <select id="target"></select>
+
+    <label for="mode">Show translation as</label>
+    <select id="mode">
+      <option value="replace">Replace the text</option>
+      <option value="outlined">Replace, outlined</option>
+      <option value="underlined">Replace, underlined</option>
+      <option value="dashed">Replace, dashed underline</option>
+      <option value="both">Both, original then translation</option>
+      <option value="bubble">A bubble, leaving the page alone</option>
+    </select>
+
+    <label>Provider order</label>
+    <ul id="providers" class="providers"></ul>
+    <div class="inline end">
+      <button id="test" class="small">Test providers</button>
+    </div>
+
+    <label for="trigger">Trigger key</label>
+    <select id="trigger">
+      <option value="Control">Ctrl</option>
+      <option value="Alt">Alt</option>
+      <option value="Shift">Shift</option>
+    </select>
+
+    <label for="minloading">Show loading for at least <output id="minloading-value"></output></label>
+    <input type="range" id="minloading" min="0" max="2000" step="100">
+    <p class="hint italic">This setting does not impact translation time.</p>
+
+    <label for="toasts">Show notices</label>
+    <select id="toasts">
+      <option value="top-left">Top left</option>
+      <option value="top-center">Top center</option>
+      <option value="top-right">Top right</option>
+      <option value="bottom-left">Bottom left</option>
+      <option value="bottom-center">Bottom center</option>
+      <option value="bottom-right">Bottom right</option>
+      <option value="off">Disabled</option>
+    </select>
+  </section>
+
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

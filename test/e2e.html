@@ -1,0 +1,199 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Hover Translate end to end</title>
+<link rel="stylesheet" href="../src/styles/content.css">
+<style>
+  body { font: 14px/1.6 system-ui, sans-serif; margin: 2rem; }
+  #results { font-family: ui-monospace, monospace; white-space: pre-wrap; }
+  .pass { color: #15803d; } .fail { color: #b91c1c; font-weight: 700; }
+  #stage { border: 1px solid #e2e8f0; padding: 1rem; margin-top: 2rem; }
+</style>
+</head>
+<body>
+<h1>End to end</h1>
+<p>Runs the real content script over the real fixture, translating through the real endpoints.
+The only things stubbed are the <code>chrome.*</code> APIs a page cannot have.</p>
+<div id="results">running...</div>
+<div id="stage"></div>
+
+<script>
+// Must exist before any module imports run.
+const store = { targetLang: "en", triggerKey: "Control", holdDelay: 60, minLoadingMs: 0,
+                toastPosition: "off", displayMode: "replace", providerOrder: ["tencent","google","mymemory"] };
+globalThis.__sent = [];
+globalThis.chrome = {
+  runtime: {
+    onMessage: { addListener(fn) { globalThis.__onMessage = fn; } },
+    sendMessage(message) {
+      globalThis.__sent.push(message);
+      return new Promise((resolve) => globalThis.__onMessage(message, {}, resolve));
+    },
+    getURL: (path) => new URL("../" + path, location.href).href,
+  },
+  storage: {
+    sync: {
+      get: async (defaults) => ({ ...defaults, ...store }),
+      set: async (patch) => Object.assign(store, patch),
+    },
+    local: { set: async () => {}, get: async () => ({}) },
+    onChanged: { addListener() {} },
+  },
+};
+</script>
+
+<script type="module">
+import "../src/background.js";
+
+const out = [];
+let failures = 0;
+const check = (name, ok, detail = "") => {
+  if (ok) out.push(`<span class="pass">PASS</span> ${name}`);
+  else { failures++; out.push(`<span class="fail">FAIL</span> ${name} ${detail}`); }
+  document.getElementById("results").innerHTML = out.join("\n");
+};
+
+const html = await (await fetch("./fixture.html")).text();
+const doc = new DOMParser().parseFromString(html, "text/html");
+document.getElementById("stage").append(...doc.body.childNodes);
+
+await import("../src/content/index.js");
+
+const byText = (sel, needle) =>
+  [...document.querySelectorAll(sel)].find((el) => el.textContent.includes(needle));
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+let sawPending = false;
+let nodesAdded = 0;
+new MutationObserver((records) => {
+  for (const r of records) {
+    if (r.type === "attributes" && r.target.classList?.contains("ht-pending")) sawPending = true;
+    if (r.type === "childList") nodesAdded += r.addedNodes.length;
+  }
+}).observe(document.getElementById("stage"), {
+  attributes: true, childList: true, subtree: true, attributeFilter: ["class"],
+});
+
+// Drives the real listeners: pointer over the element, then hold the trigger key.
+async function ctrlHover(el, { settle = 4000 } = {}) {
+  const before = el.textContent;
+  el.dispatchEvent(new MouseEvent("mousemove", { bubbles: true }));
+  document.dispatchEvent(new KeyboardEvent("keydown", { key: "Control", bubbles: true }));
+  document.dispatchEvent(new KeyboardEvent("keyup", { key: "Control", bubbles: true }));
+  const deadline = Date.now() + settle;
+  while (Date.now() < deadline) {
+    await sleep(60);
+    if (el.textContent !== before && !el.classList.contains("ht-pending")) break;
+  }
+  await sleep(60);
+}
+
+const ascii = (s) => !/[Ѐ-ӿ一-鿿぀-ヿ؀-ۿ가-힯]/.test(s);
+
+// 1. plain CJK paragraph
+const zh = byText("#stage p", "简体中文");
+const zhBefore = zh.textContent;
+await ctrlHover(zh);
+check("chinese paragraph is replaced with english", ascii(zh.textContent) && zh.textContent !== zhBefore,
+  JSON.stringify(zh.textContent.slice(0, 70)));
+check("block is marked translated", zh.getAttribute("data-ht-state") === "translated");
+check("the loading state was shown while in flight", sawPending);
+check("showing it added no node to the page", nodesAdded === 0, String(nodesAdded));
+check("the loading class is gone when done", !zh.classList.contains("ht-pending"));
+check("translated text is left with no decoration of its own",
+  getComputedStyle(zh).textDecorationLine === "none", getComputedStyle(zh).textDecorationLine);
+check("the request went through the background worker", globalThis.__sent.length > 0);
+
+// 2. ctrl again reverts
+await ctrlHover(zh);
+check("second trigger restores the original text", zh.textContent === zhBefore,
+  JSON.stringify(zh.textContent.slice(0, 40)));
+check("state attribute is cleared", !zh.hasAttribute("data-ht-state"));
+
+// 3. paragraph with a link
+const fr = byText("#stage p", "canapé rouge");
+await ctrlHover(fr);
+check("french paragraph is translated", /cat|sleep/i.test(fr.textContent), JSON.stringify(fr.textContent));
+check("the link is still there with its href",
+  fr.querySelector("a")?.getAttribute("href") === "https://example.com");
+check("the link text was translated too",
+  /sofa|couch/i.test(fr.querySelector("a")?.textContent || ""), fr.querySelector("a")?.textContent);
+
+// 4. paragraph with an inline code span
+const es = byText("#stage p", "npm install");
+await ctrlHover(es);
+check("spanish paragraph is translated", /install|package/i.test(es.textContent), JSON.stringify(es.textContent));
+check("code span survives byte for byte",
+  es.querySelector("code")?.textContent === "npm install --save-dev vite",
+  JSON.stringify(es.querySelector("code")?.textContent));
+
+// 4b. reverting a block whose opaque child was moved into the translation must give it back
+const esOriginal = "npm install --save-dev vite";
+await ctrlHover(es);
+check("revert restores the code element itself, not just the text",
+  es.querySelector("code")?.textContent === esOriginal,
+  JSON.stringify(es.innerHTML));
+check("revert leaves no empty class attribute", es.getAttribute("class") === null,
+  JSON.stringify(es.getAttribute("class")));
+check("revert restores the spanish text", es.textContent.includes("Para instalar"),
+  JSON.stringify(es.textContent.slice(0, 50)));
+
+// 5. paragraph with an image and a sup
+const it = byText("#stage p", "il nostro logo");
+await ctrlHover(it);
+check("italian paragraph is translated", /logo/i.test(it.textContent), JSON.stringify(it.textContent));
+check("the image survives", it.querySelector("img") !== null);
+check("the superscript survives", it.querySelector("sup")?.textContent === "1");
+
+// 6. long inline run keeps its markup
+const de = byText("#stage p", "ausführliche");
+await ctrlHover(de);
+check("german paragraph is translated", ascii(de.textContent), JSON.stringify(de.textContent));
+check("the long em keeps its tag and is in english",
+  de.querySelector("em") && ascii(de.querySelector("em").textContent),
+  JSON.stringify(de.querySelector("em")?.textContent));
+
+// 7. things that must not be touched
+const pre = document.querySelector("#stage pre code");
+const preBefore = pre.textContent;
+await ctrlHover(pre, { settle: 500 });
+check("pre block is left alone", pre.textContent === preBefore);
+
+const nt = document.querySelector("#stage p.notranslate");
+const ntBefore = nt.textContent;
+await ctrlHover(nt, { settle: 500 });
+check("notranslate paragraph is left alone", nt.textContent === ntBefore);
+
+// 8. already english is skipped
+const en = byText("#stage p", "already in English");
+const enBefore = en.textContent;
+await ctrlHover(en, { settle: 3000 });
+check("english paragraph is not rewritten", en.textContent === enBefore);
+check("english paragraph is not marked translated", !en.hasAttribute("data-ht-state"));
+
+// 9. list items are independent
+const li1 = byText("#stage li", "Eerste punt");
+const li2 = byText("#stage li", "Tweede punt");
+const li2Before = li2.textContent;
+await ctrlHover(li1);
+check("the hovered list item is translated", ascii(li1.textContent), JSON.stringify(li1.textContent));
+check("its sibling is untouched", li2.textContent === li2Before);
+
+// 10. escape restores everything
+document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+await sleep(120);
+check("escape restores every translated block",
+  document.querySelectorAll("#stage [data-ht-state]").length === 0,
+  `${document.querySelectorAll("#stage [data-ht-state]").length} left`);
+check("the french paragraph reads french again", fr.textContent.includes("canapé rouge"));
+check("escape restored the image too", it.querySelector("img") !== null && it.textContent.includes("nostro logo"),
+  JSON.stringify(it.innerHTML));
+check("escape restored the italian superscript", it.querySelector("sup")?.textContent === "1");
+
+document.getElementById("results").innerHTML =
+  out.join("\n") + `\n\n${failures === 0 ? "ALL PASS" : failures + " FAILURE(S)"}`;
+document.title = failures === 0 ? "e2e: all pass" : `e2e: ${failures} failed`;
+</script>
+</body>
+</html>
