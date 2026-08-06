@@ -20,8 +20,7 @@
   .lead { font-size: 17.5px; color: #334155; }
   a { color: #0e7490; }
   figure { margin: 24px 0; }
-  .shot { height: 168px; border-radius: 10px;
-          background: linear-gradient(120deg, #0e7490, #38bdf8 60%, #a5f3fc); }
+  .shot { display: block; width: 100%; height: auto; border-radius: 10px; }
   figcaption { color: #64748b; font-size: 13px; margin-top: 8px; }
   .card { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 16px 18px; margin: 22px 0; }
   .card h3 { margin: 0 0 10px; font-size: 15px; }
@@ -42,9 +41,10 @@
 <div class="wrap">
 <article>
   <p class="tip" lang="en" translate="no">
-    <b>Demo page.</b> Point at any paragraph below and tap <kbd>Ctrl</kbd>. Switch between Replace,
-    Both and Bubble in the extension popup to capture each mode. This box is marked
-    <code>translate="no"</code>, so it stays in English and out of your screenshots.
+    <b>Demo page.</b> Point at any paragraph below and tap <kbd>Ctrl</kbd>, or point at the image to
+    have it read. Switch between Replace, Both and Bubble in the extension popup to capture each
+    mode. This box is marked <code>translate="no"</code>, so it stays in English and out of your
+    screenshots.
   </p>
 
   <h1>掌上游戏机市场迎来新一轮竞争</h1>
@@ -55,8 +55,8 @@
   <p>本周发布的新机型配备了更大的散热模块和更高刷新率的屏幕。厂商表示，这一设计能够在长时间游戏过程中保持稳定的帧率，而不会出现明显的降频现象。详细的规格可以在 <a href="https://example.com">官方网站</a> 上查阅。</p>
 
   <figure>
-    <div class="shot"></div>
-    <figcaption>新款掌机的金属外壳与扩展坞（图片来源: 厂商提供）</figcaption>
+    <img class="shot" src="demo-sign.png" width="1520" height="600" alt="新一代掌上游戏机">
+    <figcaption>新款掌机的规格与预售价（图片来源: 厂商提供）</figcaption>
   </figure>
 
   <p>除了硬件升级之外，配件生态也在快速扩张。专用充电扩展坞支持 4K60 帧输出，可以直接连接电视使用。开发者只需要在配置文件中加入 <code>--enable-dock</code> 参数即可启用该功能。</p>

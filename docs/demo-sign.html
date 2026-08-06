@@ -1,0 +1,41 @@
+<!doctype html>
+<!-- Source for demo-sign.png, the image the demo page shows and the capture translates.
+     Regenerate with:
+       chrome --headless --disable-gpu --hide-scrollbars \
+         --screenshot=docs/demo-sign.png --window-size=1520,600 docs/demo-sign.html -->
+<meta charset="utf-8">
+<style>
+  html, body { margin: 0; padding: 0; }
+  body {
+    width: 1520px; height: 600px; position: relative; overflow: hidden;
+    font-family: "Microsoft YaHei", "SimHei", system-ui, sans-serif;
+    background: linear-gradient(125deg, #06272f 0%, #0e7490 55%, #0891b2 100%);
+  }
+  /* A soft highlight, so the flat gradient reads as a photographed surface. */
+  body::after {
+    content: ""; position: absolute; inset: 0;
+    background: radial-gradient(circle at 74% 22%, rgba(255,255,255,.22), transparent 46%);
+  }
+  .panel { position: absolute; left: 88px; top: 92px; color: #fff; }
+  h1 { font-size: 78px; margin: 0 0 34px; font-weight: 800; letter-spacing: .01em; }
+  .spec { font-size: 44px; margin: 0 0 22px; color: #e0f2fe; }
+  .price { position: absolute; right: 96px; bottom: 96px; text-align: right; color: #fff; }
+  .price .amount { font-size: 88px; font-weight: 800; line-height: 1; }
+  .price .from { font-size: 34px; color: #a5f3fc; }
+  .badge {
+    position: absolute; right: 96px; top: 92px;
+    background: #fde047; color: #422006; font-size: 38px; font-weight: 800;
+    padding: 16px 30px; border-radius: 12px;
+  }
+</style>
+<div class="panel">
+  <h1>新一代掌上游戏机</h1>
+  <p class="spec">屏幕刷新率 120 赫兹</p>
+  <p class="spec">电池容量 8000 毫安时</p>
+  <p class="spec">支持 4K60 帧输出</p>
+</div>
+<div class="badge">现已发售</div>
+<div class="price">
+  <div class="from">预售价</div>
+  <div class="amount">2499 元</div>
+</div>

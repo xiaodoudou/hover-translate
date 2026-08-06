@@ -4,7 +4,9 @@
 tap <kbd>Ctrl</kbd>, and it is translated in place. Tap it again to get the original back,
 <kbd>Esc</kbd> restores the whole page.
 
-![Hover Translate translating a paragraph in place](docs/demo.gif)
+![Hover Translate replacing a paragraph in place, then reading an image](docs/demo.gif)
+
+*Replace, bilingual, bubble, then an image read and translated.*
 
 No account, no API key, no paid service. Three free providers, tried in the order you choose:
 
@@ -23,6 +25,8 @@ Words in an image are pixels, so they have to be read before they can be transla
 image and tapping <kbd>Ctrl</kbd> reads it and lays the translation over it. The page's own DOM is
 never touched: the result goes in a closed shadow root anchored above the image, so the `<img>` keeps
 its original `src` and nothing is inserted beside it.
+
+![An image of a Chinese product banner, read and translated in place](docs/screenshots/4-image.png)
 
 This is **off until you turn it on**, because reading an image the page did not serve itself is a
 cross-origin fetch that needs a host permission. Setting **Translate images** to *Yes* in the popup
@@ -62,7 +66,7 @@ any second key, clicking or scrolling while the trigger key is down cancels the 
 
 ## Display modes
 
-Each one is shown in the demo above, in order.
+Each one is shown in the demo above, in order, before the image at the end.
 
 | Mode | What it does |
 | --- | --- |

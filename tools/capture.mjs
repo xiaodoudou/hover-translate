@@ -200,6 +200,54 @@ for (const [mode, caption] of MODES) {
 }
 console.log("  0-loading.png");
 
+// --- images ---------------------------------------------------------------
+// Off by default, so the capture turns it on the way the popup would. No host permission is needed
+// here: the demo image is same-origin with the page, which the content script can fetch itself.
+{
+  await inExtension(`chrome.storage.sync.set({displayMode: "replace", translateImages: true, minLoadingMs: ${LOADING_MS}})`);
+  await sleep(500);
+  await page.send("Page.reload");
+  await sleep(2200);
+  await main(CURSOR);
+  await main(LABEL("Images too"));
+
+  // Nudged past centre so the headline clears the caption pill, which is pinned to the top.
+  const rect = await main(`(() => { const img = document.querySelector('img.shot');
+    img.scrollIntoView({block: 'center'});
+    window.scrollBy(0, 70);
+    const r = img.getBoundingClientRect();
+    return {x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2)}; })()`);
+  await hold(300);
+
+  for (const step of [0.0, 0.4, 0.7, 0.9, 1.0]) {
+    await moveCursor(Math.round(rect.x * step + 120 * (1 - step)), Math.round(rect.y * step + 90 * (1 - step)));
+    await grab();
+  }
+  await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: rect.x, y: rect.y, button: "none" });
+  await hold(500);
+
+  const key = { key: "Control", code: "ControlLeft", windowsVirtualKeyCode: 17, nativeVirtualKeyCode: 17 };
+  await page.send("Input.dispatchKeyEvent", { type: "rawKeyDown", ...key, modifiers: 2 });
+  await sleep(40);
+  await page.send("Input.dispatchKeyEvent", { type: "keyUp", ...key });
+
+  // The bar sweeps across the middle of the image while the recogniser is working.
+  await sleep(450);
+  await writeFile(join(stills, "4-image-loading.png"), await readFile(await grab()));
+  await hold(LOADING_MS - 300);
+
+  // Reading an image takes longer than a block of text, so this waits on the result rather than
+  // guessing at it: a fixed sleep captured the bar as often as the translation.
+  for (let i = 0; i < 60; i++) {
+    await grab();
+    if (await main(`!!document.querySelector('body > [data-ht-ui="image"]')`)) break;
+    await sleep(150);
+  }
+  await hold(1400);
+  await writeFile(join(stills, "4-image.png"), await readFile(await grab()));
+  console.log("  4-image-loading.png\n  4-image.png");
+}
+
 chrome.kill();
 server.close();
 await sleep(300);
