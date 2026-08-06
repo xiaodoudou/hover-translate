@@ -331,6 +331,38 @@ check("genuine english is still detected as english",
 check("low confidence on latin text yields nothing",
   pickLanguage([{ detectedLanguage: "en", confidence: 0.1 }], "hmm") === null);
 
+// --- a wrapper is never the target ----------------------------------------
+// Pointing at the gap between a header, an article and a footer used to resolve to the element
+// holding all three, so one tap rewrote the whole page.
+const wrapper = document.createElement("div");
+wrapper.innerHTML = `<header>站点导航 首页 分类</header>
+  <div class="art"><h1>标题</h1><p class="para">这是一段正文，用来测试。</p></div>
+  <footer>页脚 版权所有</footer>`;
+document.getElementById("stage").append(wrapper);
+check("a wrapper holding blocks is refused", resolveBlock(wrapper) === null,
+  String(resolveBlock(wrapper)?.tagName));
+check("but the paragraph inside it still resolves",
+  resolveBlock(wrapper.querySelector(".para")) === wrapper.querySelector(".para"));
+check("and so does the heading", resolveBlock(wrapper.querySelector("h1"))?.tagName === "H1");
+
+// A sentence that also holds a nested list is still a sentence: its own loose text decides.
+const nestedList = document.createElement("ul");
+nestedList.innerHTML = `<li id="outer-li">这是外层的一句话<ul><li>里面还有一条</li></ul></li>`;
+document.getElementById("stage").append(nestedList);
+check("an item carrying its own text is kept, nested list and all",
+  resolveBlock(document.getElementById("outer-li"))?.id === "outer-li");
+
+// --- shadow roots ---------------------------------------------------------
+// A listener on the document is handed the host, whose own text is empty. The real node comes from
+// composedPath(), so what matters here is that the inner node resolves once it is reached.
+const shadowHost = document.createElement("div");
+document.getElementById("stage").append(shadowHost);
+const shadowRoot = shadowHost.attachShadow({ mode: "open" });
+shadowRoot.innerHTML = `<div id="shadow-msg">不太明白您的意思</div>`;
+check("the node inside a shadow root resolves to itself",
+  resolveBlock(shadowRoot.getElementById("shadow-msg"))?.id === "shadow-msg");
+check("the host on its own resolves to nothing", resolveBlock(shadowHost) === null);
+
 document.getElementById("results").innerHTML =
   out.join("\n") + `\n\n${failures === 0 ? "ALL PASS" : failures + " FAILURE(S)"}`;
 document.title = failures === 0 ? "harness: all pass" : `harness: ${failures} failed`;

@@ -127,8 +127,15 @@ try {
   await page.send("Page.reload");
   await sleep(2500);
 
-  const ctx = page.contexts.filter((c) => c.origin === `chrome-extension://${EXT_ID}`).pop();
+  // The fixture frames a chat, so the extension has a world per frame. Everything below addresses
+  // the top document, which has to be picked by frame id rather than by taking the last one.
+  const { frameTree } = await page.send("Page.getFrameTree");
+  const topFrameId = frameTree.frame.id;
+  const worlds = page.contexts.filter((c) => c.origin === `chrome-extension://${EXT_ID}`);
+  // Last, not first: the reload above leaves the pre-reload contexts in the list, and they are dead.
+  const ctx = worlds.filter((c) => c.auxData?.frameId === topFrameId).pop() || worlds.pop();
   check("content script injected into its own isolated world", !!ctx, "content script never ran");
+  check("and into the framed document as well", worlds.length > 1, `${worlds.length} world(s)`);
   if (!ctx) await cleanup(1);
 
   const ev = async (expression) => {
@@ -672,6 +679,42 @@ try {
   check("with image translation off, nothing happens at all", (await overlayCount()) === 0);
   await ev(`chrome.storage.sync.set({translateImages: true})`);
   await sleep(500);
+
+  // --- framed content -----------------------------------------------------
+  // Mouse events go to the innermost frame, key events to the focused one. With the chat in an
+  // iframe and focus still on the top document those are different content scripts, so the framed
+  // message used to be unreachable while the top frame fired on whatever it last saw.
+  console.log("\na message inside an iframe is the one that translates");
+  const inPage = async (expression) => {
+    const r = await page.send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
+    if (r.exceptionDetails) throw new Error(r.exceptionDetails.text);
+    return r.result.value;
+  };
+  const framedText = () =>
+    inPage(`document.getElementById('chat-frame').contentDocument.getElementById('framed-msg').textContent.trim()`);
+
+  const beforeFramed = await framedText();
+  const translatedBefore = await ev(`document.querySelectorAll('[data-ht-state]').length`);
+  const framedSpot = await inPage(`(() => {
+    const f = document.getElementById('chat-frame');
+    f.scrollIntoView({block: 'center'});
+    const r = f.getBoundingClientRect();
+    return { x: Math.round(r.left + 90), y: Math.round(r.top + 30) };
+  })()`);
+
+  await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: framedSpot.x, y: framedSpot.y, button: "none" });
+  await sleep(200);
+  const ctrl = { key: "Control", code: "ControlLeft", windowsVirtualKeyCode: 17, nativeVirtualKeyCode: 17 };
+  await page.send("Input.dispatchKeyEvent", { type: "rawKeyDown", ...ctrl, modifiers: 2 });
+  await sleep(40);
+  await page.send("Input.dispatchKeyEvent", { type: "keyUp", ...ctrl });
+  for (let i = 0; i < 60 && (await framedText()) === beforeFramed; i++) await sleep(200);
+
+  const afterFramed = await framedText();
+  console.log(`   framed message: ${JSON.stringify(beforeFramed)} -> ${JSON.stringify(afterFramed)}`);
+  check("the message inside the frame was translated", afterFramed !== beforeFramed, afterFramed);
+  check("and the top document was left alone",
+    (await ev(`document.querySelectorAll('[data-ht-state]').length`)) === translatedBefore);
 
   // --- orphaned content script -------------------------------------------
   // Reloading the extension leaves the copy already injected into an open tab with nothing behind

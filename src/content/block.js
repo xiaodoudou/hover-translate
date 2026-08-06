@@ -23,6 +23,35 @@ function isExcluded(el) {
   }
 }
 
+// Tags that carry a passage of their own, as opposed to the many block-level tags that are really
+// controls or decoration. Only these count towards deciding that an element is a layout wrapper: a
+// table cell holding a label is still a cell, but a div holding a header, an article and a footer
+// is not something anyone meant to point at.
+const STRUCTURAL_TAGS = new Set([
+  "DIV", "P", "SECTION", "ARTICLE", "ASIDE", "HEADER", "FOOTER", "MAIN", "NAV", "BLOCKQUOTE",
+  "UL", "OL", "LI", "DL", "DD", "DT", "TABLE", "TBODY", "TR", "FIGURE", "FORM", "ADDRESS",
+  "H1", "H2", "H3", "H4", "H5", "H6",
+]);
+
+// True when the element holds no words of its own and several structural children that do. The
+// pointer was over the gap between them rather than over a paragraph. Its own loose text is what
+// tells the two apart: a list item carrying a sentence and a nested list is still a sentence.
+function isWrapper(el) {
+  for (const node of el.childNodes) {
+    if (node.nodeType === Node.TEXT_NODE && node.nodeValue.trim().length >= BLOCK_MIN_TEXT) {
+      return false;
+    }
+  }
+  let passages = 0;
+  for (const child of el.children) {
+    if (!STRUCTURAL_TAGS.has(child.tagName)) continue;
+    if ((child.innerText || "").trim().length < BLOCK_MIN_TEXT) continue;
+    // One child is just a wrapper around the same passage, and translating it reads the same.
+    if (++passages > 1) return true;
+  }
+  return false;
+}
+
 // Walks up from the hovered node to the paragraph-sized element the user meant to point at.
 // Returns null when nothing under the cursor is safe or worth translating.
 export function resolveBlock(node) {
@@ -38,6 +67,8 @@ export function resolveBlock(node) {
     if (text.length < BLOCK_MIN_TEXT) continue;
     // A block this big is a container, not a paragraph: refuse rather than rewrite half the page.
     if (text.length > BLOCK_MAX_TEXT) return null;
+    // Climbing past a wrapper only reaches bigger wrappers, so this refuses rather than continues.
+    if (isWrapper(el)) return null;
     return el;
   }
   return null;
