@@ -352,6 +352,28 @@ document.getElementById("stage").append(nestedList);
 check("an item carrying its own text is kept, nested list and all",
   resolveBlock(document.getElementById("outer-li"))?.id === "outer-li");
 
+// --- a <pre> is not automatically code -------------------------------------
+// Chat clients render messages into one. Taobao's does, inside its editor component, and refusing
+// every <pre> meant refusing every message in the conversation.
+const preProse = document.createElement("div");
+preProse.innerHTML =
+  `<pre class="edit" style="font-family: Roboto, 'PingFang SC', sans-serif; white-space: break-spaces">` +
+  `这个我说不好，大部份能用，偶尔会有不能用的。有买家问，我这边都是回复不能用</pre>`;
+document.getElementById("stage").append(preProse);
+check("a pre styled as prose is translated", resolveBlock(preProse.querySelector("pre"))?.tagName === "PRE",
+  String(resolveBlock(preProse.querySelector("pre"))));
+
+const preMono = document.createElement("div");
+preMono.innerHTML = `<pre style="font-family: Menlo, monospace">npm install --save-dev vite</pre>`;
+document.getElementById("stage").append(preMono);
+check("a pre in a monospace font is still refused", resolveBlock(preMono.querySelector("pre")) === null);
+
+const preCode = document.createElement("div");
+preCode.innerHTML = `<pre style="font-family: Roboto, sans-serif"><code>const x = 1;</code></pre>`;
+document.getElementById("stage").append(preCode);
+check("a pre holding code is refused whatever the font",
+  resolveBlock(preCode.querySelector("code")) === null);
+
 // --- shadow roots ---------------------------------------------------------
 // A listener on the document is handed the host, whose own text is empty. The real node comes from
 // composedPath(), so what matters here is that the inner node resolves once it is reached.

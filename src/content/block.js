@@ -8,10 +8,27 @@ import {
 
 const MAX_CLIMB = 12;
 
+// A <pre> is refused because it usually holds code, where rewriting the words would be wrong and
+// the whitespace is load bearing. It is not always code, though: chat clients render messages into
+// one, Taobao's among them, and refusing those means refusing every message in the conversation.
+// A nested <code> settles it outright; failing that the font does, since a browser renders <pre> in
+// monospace unless the page has deliberately styled it as prose.
+const MONOSPACE = /\bmonospace\b|\bconsolas\b|\bmenlo\b|\bmonaco\b|\bcourier\b|\bui-monospace\b|mono\b/i;
+
+function isCodeBlock(el) {
+  if (el.querySelector("code")) return true;
+  try {
+    return MONOSPACE.test(getComputedStyle(el).fontFamily || "");
+  } catch {
+    // Unstyled, so the browser default of monospace stands: treat it as code.
+    return true;
+  }
+}
+
 // True if the node sits anywhere inside something we must never rewrite.
 function isExcluded(el) {
   for (let n = el; n && n !== document.documentElement; n = n.parentElement) {
-    if (EXCLUDE_TAGS.has(n.tagName)) return true;
+    if (n.tagName === "PRE" ? isCodeBlock(n) : EXCLUDE_TAGS.has(n.tagName)) return true;
     if (n.isContentEditable) return true;
     // Text this extension added itself, such as the bilingual line. Never a translation target.
     if (n.hasAttribute("data-ht-ui")) return true;
