@@ -1,7 +1,7 @@
 # Hover Translate
 
-**A Chrome extension that translates the text under your pointer.** Point at any text, tap
-<kbd>Ctrl</kbd>, and it is translated in place. Tap it again to get the original back,
+**A Chrome extension that translates whatever is under your pointer, text or image.** Point at it,
+tap <kbd>Ctrl</kbd>, and it is translated in place. Tap it again to get the original back,
 <kbd>Esc</kbd> restores the whole page.
 
 ![Hover Translate translating a paragraph in place](docs/demo.gif)
@@ -15,7 +15,30 @@ No account, no API key, no paid service. Three free providers, tried in the orde
 | **MyMemory** | Last resort: needs to be told the source language and caps each request at 500 characters |
 
 If one fails the next is tried, so a single outage is not a dead extension. The popup shows which
-provider served the last block and how long it took.
+provider served the last block and how long it took, text and images counted separately.
+
+## Images
+
+Words in an image are pixels, so they have to be read before they can be translated. Pointing at an
+image and tapping <kbd>Ctrl</kbd> reads it and lays the translation over it. The page's own DOM is
+never touched: the result goes in a closed shadow root anchored above the image, so the `<img>` keeps
+its original `src` and nothing is inserted beside it.
+
+This is **off until you turn it on**, because reading an image the page did not serve itself is a
+cross-origin fetch that needs a host permission. Setting **Translate images** to *Yes* in the popup
+asks for that permission there and then; declining leaves the feature off rather than switching it on
+into something that cannot work. Setting it back to *No* hands the permission back.
+
+| Recogniser | Notes |
+| --- | --- |
+| **Youdao** | Reads Chinese best by a distance, and translates as it reads. Returns a finished picture rather than boxes, so it replaces the image instead of annotating it |
+| **Google Lens** | Any script. Returns each line with a box, which the usual providers above then translate |
+| **Yandex** | Any script, and the only one that reports the text and background colours it found |
+
+Youdao's endpoint **ignores the target language**: Chinese always comes back English, and everything
+else always comes back Chinese. So it declines outright unless the target is English or Chinese, and
+the language it actually answered in is checked before the result is used. When it does not match,
+the failover moves on to Lens.
 
 ## Install
 
@@ -28,9 +51,10 @@ provider served the last block and how long it took.
 | Action | Result |
 | --- | --- |
 | Hover text, tap <kbd>Ctrl</kbd> | Translates the block under the pointer |
+| Hover an image, tap <kbd>Ctrl</kbd> | Reads the image and lays the translation over it |
 | Keep <kbd>Ctrl</kbd> held and move | Translates each block you sweep over |
-| Tap <kbd>Ctrl</kbd> on a translated block | Restores it |
-| <kbd>Esc</kbd> | Restores every block on the page |
+| Tap <kbd>Ctrl</kbd> on a translated block or image | Restores it |
+| <kbd>Esc</kbd> | Restores every block and image on the page |
 
 A tap fires when you release the key, so a quick press is enough. Shortcuts are unaffected: pressing
 any second key, clicking or scrolling while the trigger key is down cancels the press, so
@@ -52,6 +76,10 @@ is left exactly as it was.
 While a request is in flight a blue gradient sweeps along the bottom edge of the block. It is painted
 as a background, not a border, an outline or an appended element, so it adds no height, shifts nothing
 and inserts no node. Once the text is replaced nothing is left behind.
+
+An image cannot use that trick, since a painted background sits behind the image's own pixels and
+would never be seen. It gets the same sweep drawn on top instead, full width across the middle of the
+image, on a track with a pale hairline so it stays legible over a light picture and a dark one alike.
 
 ## Deciding what is already in the target language
 
@@ -102,4 +130,12 @@ python -m http.server 8731
 
 - These are undocumented endpoints. They can rate-limit or change without notice, which is exactly why
   there are three of them and why failures surface in the popup rather than passing silently.
+- The Lens recogniser is the least documented of the lot: its request shape was derived from the
+  server's own error messages rather than a spec, so it is the first thing that will break if Google
+  renumbers those fields. The failover means that degrades to Yandex rather than to nothing.
 - A block over 5000 characters is refused, so a stray hover cannot rewrite half a page.
+- An image over 12 MB is refused.
+- Reloading or updating the extension leaves the copy already injected into open tabs with nothing
+  behind it, and only a page load gets a fresh one. Rather than repeating Chrome's "Extension context
+  invalidated" on every trigger, it says so once and asks you to reload the page. Undo still works,
+  since restoring a block touches nothing but the DOM.

@@ -1,4 +1,14 @@
 import { resolveBlock } from "./block.js";
+import {
+  resolveImage,
+  imageUrl,
+  readImage,
+  showImageOverlay,
+  hideImageOverlay,
+  hideAllImageOverlays,
+  showImagePending,
+  hideImagePending,
+} from "./image.js";
 import { serialize, applyInPlace, rebuild } from "./richtext.js";
 import { installHover } from "./hover.js";
 import { toast } from "./toast.js";
@@ -19,17 +29,139 @@ const inFlight = new WeakSet();
 const stripTags = (text) => text.replace(/<\/?b\d+>/g, "").replace(/\s{2,}/g, " ").trim();
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-function reportStatus(patch) {
-  chrome.storage.local
-    .set({ status: { ...patch, at: Date.now(), host: location.host } })
-    .catch(() => {});
+// A content script outlives the extension that injected it. Reloading, updating or disabling Hover
+// Translate leaves this copy running in an already-open tab with nothing behind it, and every
+// chrome.* call from then on throws "Extension context invalidated". Nothing here can reconnect:
+// only a page load gets a fresh content script. So it says that once, in words, and then goes quiet
+// rather than repeating a meaningless error on every trigger.
+let orphaned = false;
+const contextAlive = () => Boolean(chrome.runtime?.id);
+const isOrphanError = (message) =>
+  /Extension context invalidated|Receiving end does not exist|message port closed/i.test(message);
+
+function reportOrphaned() {
+  if (orphaned) return;
+  orphaned = true;
+  toast("Hover Translate was updated. Reload this page to use it here.", {
+    error: true,
+    position: settings.toastPosition,
+  });
 }
+
+// Text and images are reported separately: they go through different engines, and one succeeding
+// says nothing about the other.
+function reportStatus(patch, key = "status") {
+  // Throws rather than rejecting once the context is gone, so the promise catch is not enough.
+  try {
+    chrome.storage.local
+      .set({ [key]: { ...patch, at: Date.now(), host: location.host } })
+      .catch(() => {});
+  } catch {
+    /* orphaned: the notice has already been shown */
+  }
+}
+const reportImageStatus = (patch) => reportStatus(patch, "imageStatus");
 
 async function translatePlain(block) {
   const text = block.innerText || "";
   const result = await translateTexts([text], settings.targetLang, settings.providerOrder, text);
   if (result.same) return result;
   return { ...result, content: document.createTextNode(stripTags(result.texts[0])) };
+}
+
+// The worker reads the image when it has the host permission for it; otherwise the page fetches its
+// own bytes, which is enough for a same-origin image and costs nothing to try.
+async function recogniseImage(img) {
+  const url = imageUrl(img);
+  const ask = (payload) =>
+    chrome.runtime.sendMessage({
+      type: "ocr",
+      order: settings.imageOcrOrder,
+      targetLang: settings.targetLang,
+      ...payload,
+    });
+
+  let response = await ask({ url });
+  if (response?.error) {
+    const image = await readImage(img).catch(() => null);
+    if (!image) throw new Error(response.error);
+    response = await ask({ image });
+  }
+  if (!response) throw new Error("Background worker did not respond.");
+  if (response.error) throw new Error(response.error);
+  return response;
+}
+
+async function handleImage(img) {
+  if (hideImageOverlay(img)) return;
+  if (inFlight.has(img)) return;
+
+  inFlight.add(img);
+  // The class carries the progress cursor; the bar is what is actually visible, since the gradient
+  // the text path paints would sit behind the image's own pixels.
+  render.markPending(img);
+  showImagePending(img);
+  const startedAt = Date.now();
+  try {
+    const read = await recogniseImage(img);
+
+    // A provider that translates as it reads hands back a finished picture, so the usual chain has
+    // nothing left to do. Youdao is the one that works this way.
+    let painted;
+    let engine = read.engine;
+    let sourceLang = read.sourceLang;
+    let ms = read.ms;
+
+    if (read.image) {
+      painted = { image: read.image };
+    } else {
+      if (!read.lines?.length) {
+        toast("No text found in this image.", { position: settings.toastPosition });
+        reportImageStatus({ engine, sourceLang, ms });
+        return;
+      }
+      const texts = read.lines.map((line) => line.text);
+      const result = await translateTexts(
+        texts, settings.targetLang, settings.providerOrder, texts.join("\n"),
+      );
+      if (result.same) {
+        toast(`Already ${result.sourceLang || "in the target language"}.`, { position: settings.toastPosition });
+        reportImageStatus({ engine: "skipped", sourceLang: result.sourceLang, ms: result.ms });
+        return;
+      }
+      painted = {
+        lines: read.lines.map((line, index) => ({
+          ...line,
+          text: stripTags(result.texts[index] || line.text),
+        })),
+      };
+      engine = `${engine}+${result.engine}`;
+      sourceLang = result.sourceLang || sourceLang;
+      ms = result.ms;
+    }
+
+    const remaining = settings.minLoadingMs - (Date.now() - startedAt);
+    if (remaining > 0) await sleep(remaining);
+
+    if (!showImageOverlay(img, painted)) {
+      toast("This image is not laid out yet.", { error: true, position: settings.toastPosition });
+      return;
+    }
+    reportImageStatus({ engine, sourceLang, ms });
+  } catch (error) {
+    const message = String(error?.message || error);
+    if (isOrphanError(message) || !contextAlive()) {
+      reportOrphaned();
+      return;
+    }
+    render.markError(img);
+    toast(`Hover Translate: ${message}`, { error: true, position: settings.toastPosition });
+    reportImageStatus({ error: message });
+  } finally {
+    hideImagePending(img);
+    render.clearPending(img);
+    inFlight.delete(img);
+  }
 }
 
 async function handle(target) {
@@ -39,6 +171,19 @@ async function handle(target) {
   const done = element?.closest?.('[data-ht-state="translated"]');
   if (done) {
     render.revert(done);
+    return;
+  }
+
+  // Undoing above is pure DOM and keeps working; anything past here needs the extension behind it.
+  if (orphaned) return;
+  if (!contextAlive()) {
+    reportOrphaned();
+    return;
+  }
+
+  const img = resolveImage(target);
+  if (img) {
+    if (settings.translateImages) await handleImage(img);
     return;
   }
 
@@ -124,8 +269,12 @@ async function handle(target) {
     render.apply(block, content);
     reportStatus({ engine: result.engine, sourceLang: result.sourceLang, ms: result.ms });
   } catch (error) {
-    render.markError(block);
     const message = String(error?.message || error);
+    if (isOrphanError(message) || !contextAlive()) {
+      reportOrphaned();
+      return;
+    }
+    render.markError(block);
     toast(`Hover Translate: ${message}`, { error: true, position: settings.toastPosition });
     reportStatus({ error: message });
   } finally {
@@ -143,7 +292,7 @@ installHover({
   },
   onEscape: () => {
     hideBubble();
-    const count = render.revertAll();
+    const count = render.revertAll() + hideAllImageOverlays();
     if (count) toast(`Restored ${count} block${count === 1 ? "" : "s"}.`, { position: settings.toastPosition });
   },
 });

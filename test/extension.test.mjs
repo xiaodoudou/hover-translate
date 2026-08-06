@@ -572,6 +572,134 @@ try {
   await ev(`chrome.storage.sync.set({displayMode: 'replace'})`);
   await sleep(600);
 
+  // --- images -------------------------------------------------------------
+  // The worker has no host permission for the fixture server, so this also exercises the fallback
+  // where the page fetches its own bytes and hands them over.
+  console.log("\nan image is read and painted over, leaving the page alone");
+  const overlayCount = () => ev(`document.querySelectorAll('body > [data-ht-ui="image"]').length`);
+  const imageStatusOf = () => ev(`(async () => (await chrome.storage.local.get('imageStatus')).imageStatus)()`);
+
+  // Images ship switched off, since reading them needs a permission asked for from the popup.
+  check("images are off until asked for",
+    (await ev(`(async () => (await chrome.storage.sync.get({translateImages: null})).translateImages)()`)) !== true);
+  await ev(`chrome.storage.sync.set({translateImages: true})`);
+  await sleep(500);
+
+  async function ctrlTapImage(selector, settleMs = 30000) {
+    const before = await overlayCount();
+    const at = await ev(`(() => { const el = ${selector};
+      el.scrollIntoView({block:'center'});
+      const r = el.getBoundingClientRect();
+      return {x: Math.round(r.left + r.width/2), y: Math.round(r.top + r.height/2)}; })()`);
+    await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: at.x, y: at.y, button: "none" });
+    await sleep(80);
+    const key = { key: "Control", code: "ControlLeft", windowsVirtualKeyCode: 17, nativeVirtualKeyCode: 17 };
+    await page.send("Input.dispatchKeyEvent", { type: "rawKeyDown", ...key, modifiers: 2 });
+    await sleep(40);
+    await page.send("Input.dispatchKeyEvent", { type: "keyUp", ...key });
+    const deadline = Date.now() + settleMs;
+    while (Date.now() < deadline) {
+      await sleep(200);
+      if ((await overlayCount()) !== before) break;
+    }
+    await sleep(200);
+  }
+
+  const SIGN = `document.getElementById('sign-image')`;
+  const signSrcBefore = await ev(`${SIGN}.getAttribute('src')`);
+  const signParentBefore = await ev(`${SIGN}.parentElement.childNodes.length`);
+
+  // The loading bar has to be visible while the request is out. Watched rather than sampled,
+  // because a fast provider could come back between two polls.
+  await ev(`window.__sawBar = false;
+    new MutationObserver(() => {
+      if (document.querySelector('body > [data-ht-ui="image-pending"]')) window.__sawBar = true;
+    }).observe(document.body, { childList: true });
+    'ok'`);
+
+  // Each recogniser on its own, so a failure is attributed to the one that failed rather than
+  // hidden by the failover. Youdao translates as it reads, so it reports itself alone; the other
+  // two return lines that the usual provider chain then translates.
+  for (const [id, expected] of [["youdao", /^youdao$/], ["lens", /^lens\+/], ["yandex", /^yandex\+/]]) {
+    await ev(`chrome.storage.sync.set({imageOcrOrder: ['${id}']})`);
+    await sleep(500);
+    await ctrlTapImage(SIGN);
+    const s = await imageStatusOf();
+    console.log(`   ${id}: ${JSON.stringify(s)}`);
+    check(`${id}: an overlay went up`, (await overlayCount()) === 1, JSON.stringify(s));
+    check(`${id}: it is the engine that served it`, expected.test(String(s?.engine)), JSON.stringify(s));
+    await ctrlTapImage(SIGN);
+    check(`${id}: and it comes away again`, (await overlayCount()) === 0);
+  }
+
+  await ev(`chrome.storage.sync.set({imageOcrOrder: ['youdao','lens','yandex']})`);
+  await sleep(500);
+  await ctrlTapImage(SIGN);
+
+  const imageStatus = await imageStatusOf();
+  console.log(`   default order: ${JSON.stringify(imageStatus)}`);
+  check("an overlay was put over the image", (await overlayCount()) === 1);
+  check("a loading bar was shown while the image was being read",
+    (await ev(`window.__sawBar`)) === true);
+  check("and no bar is left once the translation is up",
+    (await ev(`document.querySelectorAll('body > [data-ht-ui="image-pending"]').length`)) === 0);
+  check("the image element itself was not touched",
+    (await ev(`${SIGN}.getAttribute('src')`)) === signSrcBefore &&
+      (await ev(`${SIGN}.hasAttribute('data-ht-state')`)) === false);
+  check("and nothing was added beside it in the page",
+    (await ev(`${SIGN}.parentElement.childNodes.length`)) === signParentBefore);
+  check("the overlay is anchored on the image",
+    await ev(`(() => { const h = document.querySelector('body > [data-ht-ui="image"]');
+      const r = ${SIGN}.getBoundingClientRect();
+      return Math.abs(parseFloat(h.style.left) - (r.left + scrollX)) < 2
+          && Math.abs(parseFloat(h.style.width) - r.width) < 2; })()`));
+  check("its contents are sealed in a closed shadow root",
+    (await ev(`document.querySelector('body > [data-ht-ui="image"]').shadowRoot`)) === null);
+
+  await ctrlTapImage(SIGN);
+  check("tapping the image again takes the overlay away", (await overlayCount()) === 0);
+
+  await ctrlTapImage(SIGN);
+  await page.send("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27, nativeVirtualKeyCode: 27 });
+  await page.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27, nativeVirtualKeyCode: 27 });
+  await sleep(400);
+  check("escape clears image overlays too", (await overlayCount()) === 0);
+
+  // Turning images off must make the trigger ignore them entirely, not just fail quietly.
+  await ev(`chrome.storage.sync.set({translateImages: false})`);
+  await sleep(500);
+  await ctrlTapImage(SIGN, 6000);
+  check("with image translation off, nothing happens at all", (await overlayCount()) === 0);
+  await ev(`chrome.storage.sync.set({translateImages: true})`);
+  await sleep(500);
+
+  // --- orphaned content script -------------------------------------------
+  // Reloading the extension leaves the copy already injected into an open tab with nothing behind
+  // it. Simulated by taking chrome.runtime.id away, which is exactly what Chrome does. This runs
+  // last: the content script latches the state and stays quiet from then on.
+  console.log("\nan orphaned content script explains itself instead of erroring");
+  await ev(`document.querySelectorAll('body > [data-ht-ui]').forEach((n) => n.remove());
+    window.__notices = 0;
+    new MutationObserver((records) => {
+      for (const r of records) for (const n of r.addedNodes) {
+        if (n.nodeType === 1 && n.matches?.('[data-ht-ui]')) window.__notices++;
+      }
+    }).observe(document.body, { childList: true });
+    Object.defineProperty(chrome.runtime, 'id', { get: () => undefined, configurable: true });
+    'ok'`);
+
+  const frBefore = await ev(`${SEL.fr}.textContent`);
+  await ctrlTap(SEL.fr, 4000);
+  check("nothing is translated once the extension is gone",
+    (await ev(`${SEL.fr}.textContent`)) === frBefore);
+  check("and a notice was put up", (await ev(`window.__notices`)) >= 1);
+  check("the block was not left marked as failed",
+    (await ev(`${SEL.fr}.classList.contains('ht-error')`)) === false);
+
+  await ctrlTap(SEL.fr, 3000);
+  check("it says it once and then stays quiet", (await ev(`window.__notices`)) === 1,
+    `${await ev(`window.__notices`)} notices`);
+
   console.log("\nconsole cleanliness");
   const errors = page.logs.filter((l) => /exception|\[error\]/i.test(l));
   check("no errors from the page or content script", errors.length === 0, errors.join(" | "));

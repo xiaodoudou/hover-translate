@@ -36,13 +36,20 @@ check("no permission beyond storage", manifest.permissions.length === 1,
   JSON.stringify(manifest.permissions));
 
 const PROVIDER_HOSTS = ["translate-pa.googleapis.com", "translate.googleapis.com",
-  "transmart.qq.com", "api.mymemory.translated.net"];
+  "transmart.qq.com", "api.mymemory.translated.net", "translate.yandex.net",
+  "lensfrontend-pa.googleapis.com", "aidemo.youdao.com"];
 for (const host of PROVIDER_HOSTS) {
   check(`host permission for ${host}`,
     manifest.host_permissions.some((h) => h.includes(host)), JSON.stringify(manifest.host_permissions));
 }
 check("no host permission beyond the provider endpoints",
   manifest.host_permissions.length === PROVIDER_HOSTS.length, JSON.stringify(manifest.host_permissions));
+// Reading an image on another site is the one broad permission, and it is asked for from the popup
+// rather than granted at install time.
+check("all-urls is optional, not granted at install",
+  !manifest.host_permissions.includes("<all_urls>") &&
+    manifest.optional_host_permissions?.includes("<all_urls>"),
+  JSON.stringify(manifest.optional_host_permissions));
 
 // Walk the static import graph from every entry point.
 const IMPORT_RE = /(?:^|[\s;{])(?:import|export)[\s\S]*?from\s*["']([^"']+)["']|import\(\s*["']([^"']+)["']\s*\)/g;
