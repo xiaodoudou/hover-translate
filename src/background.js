@@ -208,8 +208,13 @@ async function yandexOcr(blob) {
 }
 
 // --- Google Lens ----------------------------------------------------------
-// The endpoint Chrome's own Lens overlay uses. The key below ships inside Chromium; it is not tied
-// to an account. The request is the smallest message the server accepts:
+// The endpoint Chrome's own Lens overlay uses. The key below is Google's, baked into the official
+// Chrome build and recovered from it by others: it is not published by Google, is not in the
+// Chromium source, and is not ours. It is not a secret in any useful sense, since it identifies
+// Chrome rather than a user and grants access to nobody's account, but it can be rotated or
+// rate-limited without warning. Lens is ordered after Youdao partly for that reason: when this
+// stops working the failover carries on to Yandex.
+// The request is the smallest message the server accepts:
 //   LensOverlayServerRequest{ objects_request{ image_data{ payload{ image_bytes } } } }
 // image_data is a oneof, so payload must be the only member set or the request is rejected.
 const LENS_URL = "https://lensfrontend-pa.googleapis.com/v1/crupload";
