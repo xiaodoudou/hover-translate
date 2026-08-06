@@ -203,7 +203,10 @@ console.log("  0-loading.png");
 // --- images ---------------------------------------------------------------
 // Off by default, so the capture turns it on the way the popup would. No host permission is needed
 // here: the demo image is same-origin with the page, which the content script can fetch itself.
+// Where this scene starts, so it can be cut out again as a GIF of its own for the README.
+let imageStart = 0;
 {
+  imageStart = frames.length;
   await inExtension(`chrome.storage.sync.set({displayMode: "replace", translateImages: true, minLoadingMs: ${LOADING_MS}})`);
   await sleep(500);
   await page.send("Page.reload");
@@ -253,28 +256,47 @@ server.close();
 await sleep(300);
 
 // --- assemble the animation ------------------------------------------------
-const list = frames
-  .map((frame, i) => {
-    const next = frames[i + 1];
-    const seconds = next ? Math.min(1.2, Math.max(0.04, (next.at - frame.at) / 1000)) : 1.6;
-    return `file '${frame.file.split("\\").join("/")}'\nduration ${seconds.toFixed(3)}`;
-  })
-  .join("\n");
-const listFile = join(frameDir, "frames.txt");
-await writeFile(listFile, `${list}\nfile '${frames.at(-1).file.split("\\").join("/")}'\n`);
+// ffmpeg's concat demuxer holds each still for its own measured duration, so the result runs at the
+// speed the capture actually happened rather than a flat frame rate.
+async function frameList(subset, name) {
+  const list = subset
+    .map((frame, i) => {
+      const next = subset[i + 1];
+      const seconds = next ? Math.min(1.2, Math.max(0.04, (next.at - frame.at) / 1000)) : 1.6;
+      return `file '${frame.file.split("\\").join("/")}'\nduration ${seconds.toFixed(3)}`;
+    })
+    .join("\n");
+  const file = join(frameDir, name);
+  await writeFile(file, `${list}\nfile '${subset.at(-1).file.split("\\").join("/")}'\n`);
+  return file;
+}
+
+// Two passes: one to pick a palette across the whole clip, one to use it. A single pass would pick
+// its palette from the first frame and band everything after it.
+async function makeGif(listFile, out, width, tag) {
+  const palette = join(frameDir, `palette-${tag}.png`);
+  await run("ffmpeg", ["-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", listFile,
+    "-vf", `fps=12,scale=${width}:-1:flags=lanczos,palettegen=stats_mode=diff`, palette]);
+  await run("ffmpeg", ["-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", listFile, "-i", palette,
+    "-lavfi", `fps=12,scale=${width}:-1:flags=lanczos[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=3`,
+    "-loop", "0", out]);
+}
+
+const listFile = await frameList(frames, "frames.txt");
 
 const mp4 = join(docs, "demo.mp4");
 await run("ffmpeg", ["-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", listFile,
   "-vf", "scale=1280:-2:flags=lanczos,fps=20", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "23", mp4]);
 console.log("  docs/demo.mp4");
 
-const palette = join(frameDir, "palette.png");
-await run("ffmpeg", ["-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", listFile,
-  "-vf", "fps=12,scale=880:-1:flags=lanczos,palettegen=stats_mode=diff", palette]);
-await run("ffmpeg", ["-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", listFile, "-i", palette,
-  "-lavfi", "fps=12,scale=880:-1:flags=lanczos[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=3",
-  "-loop", "0", join(docs, "demo.gif")]);
+await makeGif(listFile, join(docs, "demo.gif"), 880, "full");
 console.log("  docs/demo.gif");
+
+// The image scene on its own, for the README section about images: the whole demo is too long to
+// ask someone to sit through to reach the part they are reading about.
+const imageList = await frameList(frames.slice(imageStart), "frames-image.txt");
+await makeGif(imageList, join(docs, "demo-image.gif"), 760, "image");
+console.log("  docs/demo-image.gif");
 
 // YouTube is 16:9. Padding here rather than letting YouTube do it keeps the bars on brand.
 await run("ffmpeg", ["-y", "-loglevel", "error", "-i", mp4,

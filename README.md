@@ -26,7 +26,7 @@ image and tapping <kbd>Ctrl</kbd> reads it and lays the translation over it. The
 never touched: the result goes in a closed shadow root anchored above the image, so the `<img>` keeps
 its original `src` and nothing is inserted beside it.
 
-![An image of a Chinese product banner, read and translated in place](docs/screenshots/4-image.png)
+![A Chinese product banner being read and translated in place](docs/demo-image.gif)
 
 This is **off until you turn it on**, because reading an image the page did not serve itself is a
 cross-origin fetch that needs a host permission. Setting **Translate images** to *Yes* in the popup
