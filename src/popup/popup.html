@@ -9,6 +9,7 @@
     <h2>How to use</h2>
     <p class="steps">
       Point at text, tap <kbd id="key-hint">Ctrl</kbd>.<br>
+      Point at an image, tap <kbd class="key-hint">Ctrl</kbd> to read it too.<br>
       Tap <kbd class="key-hint">Ctrl</kbd> again to restore.<br>
       Tap <kbd>Esc</kbd> to restore the page.
     </p>
@@ -16,16 +17,19 @@
 
   <section class="card">
     <h2>Last translation stats</h2>
-    <b id="stat-last">Nothing yet</b>
+    <div class="row"><span>Text</span><b id="stat-text">Nothing yet</b></div>
+    <div class="row"><span>Image</span><b id="stat-image">Nothing yet</b></div>
   </section>
 
   <section class="card">
     <h2>Configuration</h2>
 
-    <label for="target">Translate into</label>
+    <label for="target">Translate to</label>
     <select id="target"></select>
 
-    <label for="mode">Show translation as</label>
+    <h3>Text</h3>
+
+    <label for="mode">Show</label>
     <select id="mode">
       <option value="replace">Replace the text</option>
       <option value="outlined">Replace, outlined</option>
@@ -35,11 +39,30 @@
       <option value="bubble">A bubble, leaving the page alone</option>
     </select>
 
-    <label>Provider order</label>
+    <label>Provider</label>
     <ul id="providers" class="providers"></ul>
     <div class="inline end">
       <button id="test" class="small">Test providers</button>
     </div>
+
+    <h3>Image</h3>
+
+    <label for="image-on">Translate images</label>
+    <select id="image-on">
+      <option value="yes">Yes</option>
+      <option value="no">No</option>
+    </select>
+
+    <div id="image-settings">
+      <label>Provider order</label>
+      <ul id="ocr-providers" class="providers"></ul>
+      <div class="inline end">
+        <button id="grant" class="small">Allow reading images</button>
+        <button id="test-image" class="small">Test providers</button>
+      </div>
+    </div>
+
+    <h3>Other</h3>
 
     <label for="trigger">Trigger key</label>
     <select id="trigger">

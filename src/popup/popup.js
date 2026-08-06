@@ -14,9 +14,13 @@ const PROVIDER_LABELS = {
   mymemory: "MyMemory",
   cache: "Cached",
   skipped: "Skipped",
+  yandex: "Yandex",
+  youdao: "Youdao",
+  lens: "Google Lens",
 };
 
 const ALL_PROVIDERS = ["tencent", "google", "mymemory"];
+const ALL_OCR_PROVIDERS = ["youdao", "lens", "yandex"];
 // Filled in by the Test button: id -> { ok, detail }
 const verdicts = new Map();
 
@@ -27,10 +31,10 @@ const setKeyHint = (label) => {
 const KEY_LABELS = { Control: "Ctrl", Alt: "Alt", Shift: "Shift" };
 
 // The list is the failover order: enabled ids first, in the user's order, disabled ones after.
-function renderProviders(order, onChange) {
-  const enabled = order.filter((id) => ALL_PROVIDERS.includes(id));
-  const rows = [...enabled, ...ALL_PROVIDERS.filter((id) => !enabled.includes(id))];
-  const list = $("providers");
+function renderProviders(order, onChange, listId = "providers", all = ALL_PROVIDERS) {
+  const enabled = order.filter((id) => all.includes(id));
+  const rows = [...enabled, ...all.filter((id) => !enabled.includes(id))];
+  const list = $(listId);
   list.replaceChildren();
 
   for (const [index, id] of rows.entries()) {
@@ -97,24 +101,35 @@ function setStat(el, text, tone) {
 const formatDuration = (ms) =>
   ms >= 1000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.round(ms)} ms`;
 
-async function refreshLastBlock() {
-  const { status } = await chrome.storage.local.get("status");
+// An engine can be a pair, "lens+google", when one reads the image and another translates it.
+const engineLabel = (engine) =>
+  String(engine || "")
+    .split("+")
+    .map((id) => PROVIDER_LABELS[id] || id)
+    .join(" + ");
+
+function showStat(el, status) {
   if (!status) return;
   // Seconds would push the line past the popup width, and they add nothing here.
   const when = new Date(status.at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 
   if (status.error) {
-    setStat($("stat-last"), `Failed at ${when}`, "bad");
-    $("stat-last").title = status.error;
+    setStat(el, `Failed at ${when}`, "bad");
+    el.title = status.error;
     return;
   }
 
-  const provider = PROVIDER_LABELS[status.engine] || status.engine;
   const took = typeof status.ms === "number" ? `, took ${formatDuration(status.ms)}` : "";
-  setStat($("stat-last"), `${provider} at ${when}${took}`, "ok");
-  $("stat-last").title = [status.host, status.sourceLang && `detected ${status.sourceLang}`]
+  setStat(el, `${engineLabel(status.engine)} at ${when}${took}`, "ok");
+  el.title = [status.host, status.sourceLang && `detected ${status.sourceLang}`]
     .filter(Boolean)
     .join(" ");
+}
+
+async function refreshLastBlock() {
+  const { status, imageStatus } = await chrome.storage.local.get(["status", "imageStatus"]);
+  showStat($("stat-text"), status);
+  showStat($("stat-image"), imageStatus);
 }
 
 async function main() {
@@ -134,6 +149,112 @@ async function main() {
     });
   };
   paint(currentOrder);
+
+  // Reading an image on another site is a cross-origin fetch, so it needs a host permission. That
+  // is asked for at the moment images are switched on, which is both the only place a click can
+  // carry the request and the only place the reason for it is obvious.
+  const imageOn = $("image-on");
+  const granted = () => chrome.permissions.contains({ origins: ["<all_urls>"] });
+
+  const showImageSettings = async (on) => {
+    imageOn.value = on ? "yes" : "no";
+    $("image-settings").hidden = !on;
+    // Only ever shown to repair a permission that was refused or later revoked.
+    $("grant").hidden = !on || (await granted().catch(() => true));
+  };
+  await showImageSettings(settings.translateImages);
+
+  imageOn.addEventListener("change", async (e) => {
+    if (e.target.value !== "yes") {
+      setSettings({ translateImages: false });
+      // Handing the permission back when the feature is off, rather than keeping it for nothing.
+      await chrome.permissions.remove({ origins: ["<all_urls>"] }).catch(() => false);
+      await showImageSettings(false);
+      return;
+    }
+    const ok = (await granted().catch(() => false)) ||
+      (await chrome.permissions.request({ origins: ["<all_urls>"] }).catch(() => false));
+    // Refused: almost every image on a page would fail to load, so this stays off rather than
+    // being switched on into something that cannot work.
+    setSettings({ translateImages: ok });
+    await showImageSettings(ok);
+  });
+
+  $("grant").addEventListener("click", async () => {
+    await chrome.permissions.request({ origins: ["<all_urls>"] }).catch(() => false);
+    await showImageSettings(true);
+  });
+
+  let ocrOrder = settings.imageOcrOrder;
+  const paintOcr = (order) => {
+    ocrOrder = order;
+    renderProviders(
+      order,
+      (next) => {
+        setSettings({ imageOcrOrder: next });
+        paintOcr(next);
+      },
+      "ocr-providers",
+      ALL_OCR_PROVIDERS,
+    );
+  };
+  paintOcr(ocrOrder);
+
+  // Each recogniser gets the same drawn-on-the-spot sign rather than a bundled asset: no binary to
+  // ship, and it exercises the very path a page image takes.
+  const probeImage = () => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 420;
+    canvas.height = 150;
+    const context = canvas.getContext("2d");
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.fillStyle = "#111111";
+    context.font = '44px "Microsoft YaHei", "SimHei", system-ui, sans-serif';
+    context.fillText("欢迎光临本店", 30, 62);
+    context.font = '34px "Microsoft YaHei", "SimHei", system-ui, sans-serif';
+    context.fillText("请勿吸烟", 30, 120);
+    return canvas.toDataURL("image/png");
+  };
+
+  $("test-image").addEventListener("click", async () => {
+    const button = $("test-image");
+    button.disabled = true;
+    button.textContent = "Testing...";
+    for (const id of ALL_OCR_PROVIDERS) verdicts.delete(id);
+    paintOcr(ocrOrder);
+
+    const image = probeImage();
+    for (const id of ALL_OCR_PROVIDERS) {
+      try {
+        const started = Date.now();
+        const response = await chrome.runtime.sendMessage({
+          type: "ocr",
+          image,
+          order: [id],
+          targetLang: $("target").value,
+        });
+        if (response?.error) throw new Error(response.error);
+        const took = Date.now() - started;
+        // A recogniser answers with either laid-out lines or a picture of its own; both count.
+        const lines = response?.lines?.length || 0;
+        const served = response?.engine === id && (lines > 0 || Boolean(response?.image));
+        verdicts.set(id, {
+          ok: served,
+          detail: served ? `${took} ms` : "no text found",
+          title: response?.image
+            ? "returned its own translated picture"
+            : (response?.lines || []).map((line) => line.text).join(" / "),
+        });
+      } catch (error) {
+        verdicts.set(id, { ok: false, detail: "failed", title: String(error?.message || error) });
+      }
+      paintOcr(ocrOrder);
+    }
+
+    button.disabled = false;
+    button.textContent = "Test providers";
+  });
 
   // Asks each provider for one short translation on its own, so a failure is attributed to the
   // provider that actually failed rather than hidden by the failover.

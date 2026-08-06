@@ -108,6 +108,16 @@ things that must stay untouched.</p>
   create-time span. Only the text changes, each piece inside its own element.</p>
 </section>
 
+<h2>Images are read and painted over</h2>
+<section>
+  <p><img id="remote-image" src="../icons/128.png" alt="hover translate icon" width="128" height="128"></p>
+  <p class="expect">Ctrl over the image reads its text and lays the translation over each line.
+  Ctrl again takes the overlay away. This icon has no words, so it reports finding none.</p>
+
+  <p><img id="sign-image" src="sign.png" alt="shop sign in Chinese" width="480" height="270"></p>
+  <p class="expect">A real sign: every line should be covered by its own translated line.</p>
+</section>
+
 <h2>Hostile layouts for the bilingual mode</h2>
 <section>
   <p id="flex-block" class="flexy" lang="zh-CN"><span>价格</span><span>199元起，全国联保</span></p>

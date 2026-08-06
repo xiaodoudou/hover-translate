@@ -6,6 +6,12 @@ export const DEFAULTS = {
   // bubble: leave the page alone and show the translation in an overlay
   displayMode: "replace",
   triggerKey: "Control", // Control | Alt | Shift
+  // Off until asked for: reading images needs a host permission the extension does not install
+  // with, so this is turned on from the popup, where that permission can be requested.
+  translateImages: false,
+  // Which recogniser reads an image, in failover order. Youdao translates as it reads and hands
+  // back a finished picture; the other two return lines, which providerOrder above then translates.
+  imageOcrOrder: ["youdao", "lens", "yandex"],
   // Not exposed: how long the key must be held before sweep mode starts.
   holdDelay: 200,
   // The request is never slowed; the loading gradient is simply held this long so it is visible.

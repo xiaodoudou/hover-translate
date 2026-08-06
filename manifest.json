@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Hover Translate",
-  "version": "1.0.0",
-  "description": "Point at any text, tap Ctrl, and read it in your language. Free, no account, no API key.",
+  "version": "1.1.0",
+  "description": "Point at any text or image, tap Ctrl, and read it in your language. Free, no account, no API key.",
   "minimum_chrome_version": "116",
   "permissions": [
     "storage"
@@ -11,7 +11,13 @@
     "https://translate-pa.googleapis.com/*",
     "https://translate.googleapis.com/*",
     "https://transmart.qq.com/*",
-    "https://api.mymemory.translated.net/*"
+    "https://api.mymemory.translated.net/*",
+    "https://translate.yandex.net/*",
+    "https://lensfrontend-pa.googleapis.com/*",
+    "https://aidemo.youdao.com/*"
+  ],
+  "optional_host_permissions": [
+    "<all_urls>"
   ],
   "background": {
     "service_worker": "src/background.js",

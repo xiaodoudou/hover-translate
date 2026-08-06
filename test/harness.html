@@ -20,6 +20,8 @@ fixture DOM. Serve the extension folder over http and open this page: module imp
 
 <script type="module">
 import { resolveBlock } from "../src/content/block.js";
+import { resolveImage, imageUrl, showImageOverlay, hideImageOverlay, hideAllImageOverlays, hasImageOverlay,
+         showImagePending, hideImagePending } from "../src/content/image.js";
 import { serialize, applyInPlace, rebuild } from "../src/content/richtext.js";
 import { hasScriptForeignTo, pickLanguage, languageFromScript } from "../src/lib/script.js";
 
@@ -59,6 +61,74 @@ const li = byText("li", "Eerste punt");
 check("list item resolves to itself, not the list", resolveBlock(li) === li);
 const td = byText("td", "Łączy");
 check("table cell resolves to itself", resolveBlock(td) === td);
+
+// --- images: recognised lines are painted over the image ------------------
+const inlineLogo = byText("p", "il nostro logo").querySelector("img");
+check("an inline image is recognised", resolveImage(inlineLogo) === inlineLogo);
+check("a paragraph is not an image", resolveImage(byText("p", "il nostro logo")) === null);
+check("a data: image is still usable, since the bytes are read locally",
+  imageUrl(inlineLogo)?.startsWith("data:image/svg") === true);
+
+const pic = document.createElement("picture");
+const picImg = document.createElement("img");
+picImg.src = "../icons/128.png";
+pic.append(picImg);
+document.getElementById("stage").append(pic);
+check("a picture resolves to the img it wraps", resolveImage(pic) === picImg);
+
+// The overlay is measured against a real laid-out image, so the fixture one is used.
+const shot = document.getElementById("remote-image");
+await new Promise((done) => (shot.complete ? done() : shot.addEventListener("load", done, { once: true })));
+const OCR_LINES = [
+  { text: "Welcome to the shop", x: 0, y: 0, w: 128, h: 20, color: "rgb(17,17,17)", background: "rgb(255,255,255)" },
+  { text: "No smoking", x: 0, y: 40, w: 128, h: 20, color: "rgb(17,17,17)", background: "rgb(255,255,255)" },
+];
+// --- the loading bar, which stands in for the gradient the text path paints ---
+const pendingCount = () => document.querySelectorAll('body > [data-ht-ui="image-pending"]').length;
+check("a loading bar goes up as soon as the trigger fires", showImagePending(shot) === true);
+check("and it is one host, anchored on the image", pendingCount() === 1);
+check("it is not counted as a finished overlay", hasImageOverlay(shot) === false);
+check("the bar comes away again", hideImagePending(shot) === true);
+check("leaving nothing behind", pendingCount() === 0);
+check("clearing a bar that is not there is a no-op", hideImagePending(shot) === false);
+
+// The result replaces the bar rather than stacking on top of it.
+showImagePending(shot);
+check("showing the result clears the bar", showImageOverlay(shot, { lines: OCR_LINES }) === true);
+check("so only the finished overlay is left", pendingCount() === 0 && hasImageOverlay(shot) === true);
+hideImageOverlay(shot);
+
+check("the overlay goes up", showImageOverlay(shot, { lines: OCR_LINES }) === true);
+check("and it is tracked against its image", hasImageOverlay(shot) === true);
+
+const overlayHost = document.querySelector('body > [data-ht-ui="image"]');
+const shotRect = shot.getBoundingClientRect();
+check("the overlay is anchored over the image",
+  Math.abs(parseFloat(overlayHost.style.left) - (shotRect.left + scrollX)) < 1 &&
+    Math.abs(parseFloat(overlayHost.style.top) - (shotRect.top + scrollY)) < 1,
+  `${overlayHost.style.left},${overlayHost.style.top} vs ${shotRect.left + scrollX},${shotRect.top + scrollY}`);
+check("and sized to it",
+  Math.abs(parseFloat(overlayHost.style.width) - shotRect.width) < 1);
+check("the page itself gained no node inside the image's parent",
+  shot.parentElement.querySelectorAll("[data-ht-ui]").length === 0);
+check("the overlay does not swallow clicks", overlayHost.style.pointerEvents === "none");
+
+check("tapping the image again takes the overlay away", hideImageOverlay(shot) === true);
+check("nothing is left tracked", hasImageOverlay(shot) === false);
+check("and the host is gone from the page", overlayHost.isConnected === false);
+check("hiding an image with no overlay is a no-op", hideImageOverlay(shot) === false);
+
+// The other shape: a provider that translated as it read hands back a finished picture.
+check("a rendered picture is shown instead of boxes when a provider returns one",
+  showImageOverlay(shot, { image: "../icons/128.png" }) === true);
+const renderedHost = document.querySelector('body > [data-ht-ui="image"]');
+check("and it is one image, not a stack of line boxes",
+  renderedHost !== null && hasImageOverlay(shot) === true);
+hideImageOverlay(shot);
+
+showImageOverlay(shot, { lines: OCR_LINES });
+check("escape clears every image overlay", hideAllImageOverlays() === 1);
+check("and clearing again finds none", hideAllImageOverlays() === 0);
 
 // --- the real world case: an order row -----------------------------------
 const cell = q("#order-cell");
