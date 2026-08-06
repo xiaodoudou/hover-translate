@@ -66,10 +66,14 @@
 
     <label for="trigger">Trigger key</label>
     <select id="trigger">
-      <option value="Control">Ctrl</option>
-      <option value="Alt">Alt</option>
-      <option value="Shift">Shift</option>
+      <option value="Control:1">Ctrl</option>
+      <option value="Alt:1">Alt</option>
+      <option value="Shift:1">Shift</option>
+      <option value="Control:2">Ctrl twice</option>
+      <option value="Alt:2">Alt twice</option>
+      <option value="Shift:2">Shift twice</option>
     </select>
+    <p class="hint italic">Tapping twice is harder to trigger by accident.</p>
 
     <label for="minloading">Show loading for at least <output id="minloading-value"></output></label>
     <input type="range" id="minloading" min="0" max="2000" step="100">

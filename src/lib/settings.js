@@ -6,6 +6,11 @@ export const DEFAULTS = {
   // bubble: leave the page alone and show the translation in an overlay
   displayMode: "replace",
   triggerKey: "Control", // Control | Alt | Shift
+  // 1 fires on a single tap, 2 requires the key tapped twice. Two taps are far harder to hit by
+  // accident, which is the point: a modifier gets pressed constantly for reasons of its own.
+  triggerTaps: 1,
+  // Not exposed: how long the second tap may arrive after the first.
+  doubleTapMs: 400,
   // Off until asked for: reading images needs a host permission the extension does not install
   // with, so this is turned on from the popup, where that permission can be requested.
   translateImages: false,
