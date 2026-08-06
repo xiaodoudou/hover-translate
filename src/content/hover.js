@@ -4,12 +4,20 @@
 // distinguishes Ctrl+C from a bare Ctrl is the second key, not how long the key was held: any other
 // keydown, a click or a wheel while the key is down cancels the press outright.
 // Holding the key past holdDelay starts sweep mode, where each block the pointer lands on translates.
+//
+// With triggerTaps at 2 the key must be tapped twice within doubleTapMs. Only the second press acts:
+// the first is remembered and does nothing, so the modifier keeps its ordinary meaning until the
+// user asks for it twice. Everything after that is identical, holding the second press included.
 export function installHover({ getConfig, onTrigger, onEscape }) {
   let hovered = null;
   let pointer = null;
   let keyHeld = false;
   let firedThisPress = false;
   let cancelled = false;
+  // Whether this press is the one that acts. Always true on a single-tap trigger; on a double-tap
+  // trigger only the press that follows a clean tap in time.
+  let armed = false;
+  let lastTapAt = 0;
   let timer = null;
   let lastFired = null;
   let queued = false;
@@ -30,9 +38,17 @@ export function installHover({ getConfig, onTrigger, onEscape }) {
     keyHeld = false;
     firedThisPress = false;
     cancelled = false;
+    armed = false;
     lastFired = null;
     clearTimeout(timer);
     timer = null;
+  };
+
+  // A half-finished pair must not survive the user leaving: coming back to the tab and pressing the
+  // key once would otherwise translate whatever happens to be under the pointer.
+  const forget = () => {
+    lastTapAt = 0;
+    reset();
   };
 
   // Keeps keyHeld true so the pending keyup is swallowed rather than treated as a tap.
@@ -64,11 +80,11 @@ export function installHover({ getConfig, onTrigger, onEscape }) {
       // whose own text is empty, so a shadow-rendered message would never resolve to anything.
       hovered = event.composedPath?.()[0] || event.target;
       pointer = { x: event.clientX, y: event.clientY };
-      if (!keyHeld || cancelled || queued) return;
+      if (!keyHeld || !armed || cancelled || queued) return;
       queued = true;
       requestAnimationFrame(() => {
         queued = false;
-        if (keyHeld && !cancelled && hovered !== lastFired) schedule();
+        if (keyHeld && armed && !cancelled && hovered !== lastFired) schedule();
       });
     },
     { passive: true, capture: true },
@@ -81,17 +97,26 @@ export function installHover({ getConfig, onTrigger, onEscape }) {
     }
     if (event.key !== getConfig().triggerKey) {
       if (keyHeld) abort();
+      // A key in between is a shortcut being typed, not a pair being completed.
+      lastTapAt = 0;
       return;
     }
     if (event.repeat || keyHeld) return;
+    const { triggerTaps, doubleTapMs } = getConfig();
+    const paired = Date.now() - lastTapAt < doubleTapMs;
     reset();
     keyHeld = true;
-    schedule();
+    armed = triggerTaps !== 2 || paired;
+    if (armed) schedule();
   };
 
   const onKeyUp = (event) => {
     if (event.key !== getConfig().triggerKey) return;
-    if (keyHeld && !cancelled && !firedThisPress) fire(hovered);
+    const clean = keyHeld && !cancelled && !firedThisPress;
+    // A clean tap that was not the acting press is the first half of a pair: remember when it ended
+    // so the next press can pair with it. Anything else, sweeping included, starts the count over.
+    lastTapAt = clean && !armed ? Date.now() : 0;
+    if (clean && armed) fire(hovered);
     reset();
   };
 
@@ -116,6 +141,6 @@ export function installHover({ getConfig, onTrigger, onEscape }) {
     target.addEventListener("wheel", onWheel, { passive: true, capture: true });
   }
 
-  window.addEventListener("blur", reset);
-  document.addEventListener("visibilitychange", reset);
+  window.addEventListener("blur", forget);
+  document.addEventListener("visibilitychange", forget);
 }

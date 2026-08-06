@@ -24,6 +24,7 @@ import { resolveImage, imageUrl, showImageOverlay, hideImageOverlay, hideAllImag
          showImagePending, hideImagePending } from "../src/content/image.js";
 import { serialize, applyInPlace, rebuild } from "../src/content/richtext.js";
 import { hasScriptForeignTo, pickLanguage, languageFromScript } from "../src/lib/script.js";
+import { installHover } from "../src/content/hover.js";
 
 const out = [];
 let failures = 0;
@@ -345,6 +346,44 @@ check("but the paragraph inside it still resolves",
   resolveBlock(wrapper.querySelector(".para")) === wrapper.querySelector(".para"));
 check("and so does the heading", resolveBlock(wrapper.querySelector("h1"))?.tagName === "H1");
 
+// Counting only direct children missed this: every layer has exactly one child, so none of them
+// looked like a wrapper and the outermost one swallowed the page.
+const chain = document.createElement("div");
+chain.innerHTML =
+  `<div><div><div><header>站点导航 首页</header><p class="deep">这是一段正文。</p></div></div></div>`;
+document.getElementById("stage").append(chain);
+check("a chain of single-child wrappers is refused", resolveBlock(chain) === null,
+  String(resolveBlock(chain)?.className));
+check("and the paragraph at the bottom of it still resolves",
+  resolveBlock(chain.querySelector(".deep"))?.className === "deep");
+
+// GitHub puts the whole conversation in custom elements, which no list of tag names can enumerate.
+const partials = document.createElement("div");
+partials.innerHTML =
+  `<rails-partial style="display:contents"><div>第一段文字在这里。</div></rails-partial>` +
+  `<rails-partial style="display:contents"><div>第二段文字在这里。</div></rails-partial>`;
+document.getElementById("stage").append(partials);
+check("blocks held in custom elements still count as passages", resolveBlock(partials) === null,
+  String(resolveBlock(partials)?.tagName));
+
+// A flex parent blockifies its children, so a row of links reports display:block on every one of
+// them. Taobao's hot-word row under the search box is this exactly, and reading those as separate
+// passages refused the whole row.
+const hotWords = document.createElement("div");
+hotWords.style.display = "flex";
+hotWords.innerHTML =
+  `<a href="#">券后低至7.7折起</a><a href="#">七夕爆款好礼</a><a href="#">夏日美味8.8折起</a>`;
+document.getElementById("stage").append(hotWords);
+check("a flex row of links resolves to the row", resolveBlock(hotWords.querySelector("a")) === hotWords,
+  String(resolveBlock(hotWords.querySelector("a"))));
+
+// The descent must not refuse everything: one box around one paragraph is still that paragraph.
+const solo = document.createElement("div");
+solo.innerHTML = `<div><p class="solo">这是唯一的一段话。</p></div>`;
+document.getElementById("stage").append(solo);
+check("a lone box around one paragraph is kept", resolveBlock(solo) === solo,
+  String(resolveBlock(solo)?.tagName));
+
 // A sentence that also holds a nested list is still a sentence: its own loose text decides.
 const nestedList = document.createElement("ul");
 nestedList.innerHTML = `<li id="outer-li">这是外层的一句话<ul><li>里面还有一条</li></ul></li>`;
@@ -384,6 +423,55 @@ shadowRoot.innerHTML = `<div id="shadow-msg">不太明白您的意思</div>`;
 check("the node inside a shadow root resolves to itself",
   resolveBlock(shadowRoot.getElementById("shadow-msg"))?.id === "shadow-msg");
 check("the host on its own resolves to nothing", resolveBlock(shadowHost) === null);
+
+// --- the trigger: one tap, or two -----------------------------------------
+// holdDelay is set out of reach so sweep mode never starts: what is under test here is the tap.
+const trigger = { triggerKey: "Control", triggerTaps: 1, holdDelay: 99000, doubleTapMs: 400 };
+const fired = [];
+installHover({ getConfig: () => trigger, onTrigger: (t) => fired.push(t), onEscape: () => {} });
+
+// Centre of the viewport, so elementFromPoint always has something to return: a press is ignored
+// unless the pointer is really over this frame.
+const px = Math.round(innerWidth / 2);
+const py = Math.round(innerHeight / 2);
+// Falling back keeps a bad viewport from aborting the whole run: the checks below then fail and say so.
+const hoverTarget = document.elementFromPoint(px, py) || document.getElementById("stage");
+const move = () => hoverTarget.dispatchEvent(
+  new MouseEvent("mousemove", { bubbles: true, composed: true, clientX: px, clientY: py }));
+const press = (type, k = "Control") => document.dispatchEvent(new KeyboardEvent(type, { key: k, bubbles: true }));
+const tap = () => { press("keydown"); press("keyup"); };
+const naptime = (ms) => new Promise((r) => setTimeout(r, ms));
+
+move();
+tap();
+check("a single tap fires once", fired.length === 1, `fired ${fired.length}`);
+check("and it hands over the hovered node", fired[0] === hoverTarget);
+
+trigger.triggerTaps = 2;
+fired.length = 0;
+tap();
+check("with a double-tap trigger, one tap does nothing", fired.length === 0, `fired ${fired.length}`);
+tap();
+check("and the second tap fires", fired.length === 1, `fired ${fired.length}`);
+
+fired.length = 0;
+tap();
+await naptime(trigger.doubleTapMs + 200);
+tap();
+check("two taps too far apart do not pair", fired.length === 0, `fired ${fired.length}`);
+tap();
+check("but a tap arriving in time still pairs", fired.length === 1, `fired ${fired.length}`);
+
+// The pair is what makes a modifier safe to use, so a shortcut must not complete one.
+fired.length = 0;
+tap();
+press("keydown");
+press("keydown", "c");
+press("keyup", "c");
+press("keyup");
+check("a shortcut in between does not complete the pair", fired.length === 0, `fired ${fired.length}`);
+tap();
+check("and the broken pair is not resumed by the next tap", fired.length === 0, `fired ${fired.length}`);
 
 document.getElementById("results").innerHTML =
   out.join("\n") + `\n\n${failures === 0 ? "ALL PASS" : failures + " FAILURE(S)"}`;

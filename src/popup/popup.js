@@ -29,6 +29,10 @@ const setKeyHint = (label) => {
   for (const el of document.querySelectorAll("#key-hint, .key-hint")) el.textContent = label;
 };
 const KEY_LABELS = { Control: "Ctrl", Alt: "Alt", Shift: "Shift" };
+// The select carries both halves of the trigger in one value, because "Ctrl twice" is one choice to
+// the user even though it is two settings underneath.
+const triggerValue = (key, taps) => `${key}:${taps === 2 ? 2 : 1}`;
+const triggerLabel = (key, taps) => (taps === 2 ? `${KEY_LABELS[key]} twice` : KEY_LABELS[key]);
 
 // The list is the failover order: enabled ids first, in the user's order, disabled ones after.
 function renderProviders(order, onChange, listId = "providers", all = ALL_PROVIDERS) {
@@ -138,7 +142,7 @@ async function main() {
   const settings = await getSettings();
   $("target").value = settings.targetLang;
   $("mode").value = settings.displayMode;
-  $("trigger").value = settings.triggerKey;
+  $("trigger").value = triggerValue(settings.triggerKey, settings.triggerTaps);
 
   let currentOrder = settings.providerOrder;
   const paint = (order) => {
@@ -293,15 +297,16 @@ async function main() {
   $("minloading").value = settings.minLoadingMs;
   $("minloading-value").textContent = `${settings.minLoadingMs} ms`;
   $("toasts").value = settings.toastPosition;
-  setKeyHint(KEY_LABELS[settings.triggerKey]);
+  setKeyHint(triggerLabel(settings.triggerKey, settings.triggerTaps));
 
   await refreshLastBlock();
 
   $("target").addEventListener("change", (e) => setSettings({ targetLang: e.target.value }));
   $("mode").addEventListener("change", (e) => setSettings({ displayMode: e.target.value }));
   $("trigger").addEventListener("change", (e) => {
-    setSettings({ triggerKey: e.target.value });
-    setKeyHint(KEY_LABELS[e.target.value]);
+    const [key, taps] = e.target.value.split(":");
+    setSettings({ triggerKey: key, triggerTaps: Number(taps) });
+    setKeyHint(triggerLabel(key, Number(taps)));
   });
   $("minloading").addEventListener("input", (e) => {
     $("minloading-value").textContent = `${e.target.value} ms`;
