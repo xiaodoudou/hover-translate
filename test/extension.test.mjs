@@ -165,7 +165,10 @@ try {
     ko: `[...document.querySelectorAll('p')].find(e => e.getAttribute('lang') === 'ko')`,
     flex: `document.getElementById('flex-block')`,
     clipped: `document.getElementById('clipped-block')`,
+    menu: `document.getElementById('menu-item')`,
+    pinned: `document.getElementById('menu-pinned')`,
     de: `[...document.querySelectorAll('p')].find(e => e.getAttribute('lang') === 'de' && !e.classList.contains('notranslate'))`,
+    stale: `document.querySelector('#stale-region h4')`,
   };
 
   // A tap, not a hold: press and release straight away, which is how people actually use it.
@@ -379,6 +382,192 @@ try {
     (await ev(`${SEL.order}.textContent`)) !== orderBefore);
   check("and was not skipped either", (await status())?.engine !== "skipped", JSON.stringify(await status()));
 
+  // A page cuts these boxes to fit its own language, so the longer translation ends up behind the
+  // ellipsis. It has to slide under the pointer, and it has to do that without resizing the box.
+  // Both rows below are built around their one line, so there is no room to take and they slide.
+  console.log("\na clipped line slides so the whole translation can be read");
+  await ev(`chrome.storage.sync.set({clippedLines: 'fit'})`);
+  await sleep(500);
+  const nudge = async (expr) => {
+    const at = await ev(`(() => { const r = ${expr}.getBoundingClientRect();
+      return {x: Math.round(r.left + Math.min(40, r.width / 2)), y: Math.round(r.top + r.height / 2)}; })()`);
+    await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: at.x, y: at.y, button: "none" });
+    await sleep(150);
+  };
+  const away = async () => {
+    await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 4, y: 4, button: "none" });
+    await sleep(250);
+  };
+  for (const [name, sel, box, clips] of [
+    ["the block itself clips", SEL.clipped, SEL.clipped, "P"],
+    ["a box inside the block clips", SEL.pinned, `${SEL.pinned}.querySelector('.menu-label')`, "SPAN"],
+  ]) {
+    const widthBefore = await ev(`Math.round(${box}.getBoundingClientRect().width)`);
+    // Where the first glyph actually sits, not what the computed style claims. Asserting the
+    // property alone would pass on a line that never moved a pixel on screen.
+    const probe = `(() => {
+      const el = ${sel}.matches('.ht-marquee') ? ${sel} : ${sel}.querySelector('.ht-marquee');
+      if (!el) return null;
+      const runner = el.querySelector('.ht-marquee-line');
+      const anim = runner?.getAnimations().find((a) => a.id === 'ht-marquee');
+      const text = document.createTreeWalker(el, NodeFilter.SHOW_TEXT).nextNode();
+      const charAt = () => {
+        const r = document.createRange();
+        r.setStart(text, 0); r.setEnd(text, 1);
+        return Math.round(r.getBoundingClientRect().left - el.getBoundingClientRect().left);
+      };
+      const was = { state: anim?.playState, at: anim?.currentTime };
+      const samples = [];
+      if (anim && was.state === 'running') {
+        const step = anim.effect.getComputedTiming().duration;
+        // Not a sample at 1: the lap is half open, and that instant belongs to the next one.
+        for (const t of [0, 0.25, 0.5, 0.75, 0.999]) {
+          anim.pause();
+          anim.currentTime = t * step;
+          samples.push(charAt());
+        }
+        anim.currentTime = was.at;
+        anim.play();
+      }
+      const frames = anim
+        ? anim.effect.getKeyframes().map((f) => Math.round(parseFloat(f.transform.match(/-?[\\d.]+/)[0])))
+        : null;
+      return { tag: el.tagName, view: el.clientWidth, frames, samples, runner: !!runner,
+               state: was.state, at: Math.round(was.at ?? -1),
+               lap: anim ? Math.round(anim.effect.getComputedTiming().duration) : null,
+               char: charAt(),
+               moving: el.classList.contains('ht-marquee-moving'),
+               ellipsis: getComputedStyle(el).textOverflow,
+               width: Math.round(el.getBoundingClientRect().width) };
+    })()`;
+
+    await ctrlTap(sel);
+    // The pointer never left, but the text under it changed: nudge it so the hover is settled.
+    await nudge(box);
+    // It waits before it sets off, so the beginning can be read where the reader was already looking.
+    const waiting = await ev(probe);
+    check(`${name}: it holds still at first, where the page drew the line`,
+      waiting?.state === "paused" && waiting?.char === 0,
+      JSON.stringify({ state: waiting?.state, char: waiting?.char }));
+    check(`${name}: keeping the page's ellipsis until it actually sets off`,
+      waiting?.ellipsis !== "clip" && waiting?.moving === false, waiting?.ellipsis);
+    await sleep(1400);
+
+    const slide = await ev(probe);
+    console.log(`   ${name}:`, JSON.stringify(slide));
+    check(`${name}: the box that clips is marked`, !!slide, "nothing was marked");
+    check(`${name}: and it is that box, not whatever the block happens to be`, slide?.tag === clips,
+      slide?.tag);
+    check(`${name}: sliding costs the box no width`, slide && slide.width === widthBefore,
+      `${slide?.width} vs ${widthBefore}`);
+    // The pointer never left, so the wait is all it was ever going to need.
+    check(`${name}: and then it goes, without being asked twice`, slide?.state === "running",
+      slide?.state);
+    check(`${name}: a lap starts with the line off the right edge`,
+      slide && slide.frames[0] === slide.view, JSON.stringify(slide?.frames));
+    check(`${name}: and ends with it gone past the left one, so the wrap has no seam`,
+      slide && slide.frames[1] < 0 && Math.abs(slide.frames[1]) > slide.view,
+      JSON.stringify(slide?.frames));
+    // The check that matters: the glyphs themselves march left, one sample after another.
+    check(`${name}: and the text really travels, every sample left of the one before`,
+      slide && slide.samples.every((x, i) => i === 0 || x < slide.samples[i - 1]),
+      JSON.stringify(slide?.samples));
+    check(`${name}: the ellipsis is out of the way while it moves`, slide?.ellipsis === "clip",
+      slide?.ellipsis);
+
+    // What every earlier attempt got wrong: it stopped. A marquee keeps going.
+    const first = await ev(probe);
+    await sleep(1200);
+    const later = await ev(probe);
+    console.log(`   ${name} still going:`, JSON.stringify({ from: first.char, to: later.char, at: later.at }));
+    check(`${name}: it is still running a second later, not parked somewhere`,
+      later?.state === "running" && later.at > first.at, JSON.stringify({ was: first?.at, now: later?.at }));
+    check(`${name}: and the line is somewhere else on the screen than it was`,
+      later && first && later.char !== first.char, `${first?.char} -> ${later?.char}`);
+
+    await away();
+    await sleep(300);
+    const parked = await ev(probe);
+    console.log(`   ${name} parked:`, JSON.stringify({ state: parked.state ?? "gone", char: parked.char, ellipsis: parked.ellipsis }));
+    check(`${name}: leaving the block gives the page its line back`,
+      parked?.char === 0 && parked?.state === undefined,
+      JSON.stringify({ char: parked?.char, state: parked?.state ?? "gone" }));
+    check(`${name}: with the page's own ellipsis back`,
+      parked?.ellipsis !== "clip" && parked?.moving === false, parked?.ellipsis);
+    await nudge(box);
+    await sleep(1400);
+    const resumed = await ev(probe);
+    check(`${name}: coming back sets it going again`, resumed?.state === "running", resumed?.state);
+
+    await ctrlTap(sel, 6000);
+    check(`${name}: reverting leaves no marker behind`,
+      (await ev(`${sel}.querySelectorAll('.ht-marquee').length + (${sel}.matches('.ht-marquee') ? 1 : 0)`)) === 0);
+    check(`${name}: and no animation of ours left running`,
+      (await ev(`${box}.getAnimations().filter((a) => a.id === 'ht-marquee').length`)) === 0);
+    check(`${name}: and the wrapper it moved is gone with it`,
+      (await ev(`${sel}.querySelectorAll('.ht-marquee-line').length`)) === 0);
+    check(`${name}: and no leftover style attribute`,
+      (await ev(`${box}.getAttribute('style')`)) === null, await ev(`${box}.getAttribute('style')`));
+  }
+
+  // The other answer to the same line: keep the line and let the box grow instead. On the row built
+  // around its one line, since that is the one the default slides.
+  console.log("\ngrowing the box rather than moving the line");
+  const shapeOf = (row) => ev(`(() => { const el = ${row}.querySelector('.menu-label');
+    const r = el.getBoundingClientRect();
+    return { cls: el.className, w: Math.round(r.width), h: Math.round(r.height),
+             hides: el.scrollWidth - el.clientWidth }; })()`);
+  const shape = () => shapeOf(SEL.menu);
+  await ctrlTap(SEL.pinned);
+  const sliding = await shapeOf(SEL.pinned);
+  await ev(`chrome.storage.sync.set({clippedLines: 'grow'})`);
+  await sleep(700);
+  const grown = await shapeOf(SEL.pinned);
+  console.log("   ", JSON.stringify({ sliding, grown }));
+  check("the line that was sliding is unclipped instead, without translating again",
+    grown.cls.includes("ht-unclipped") && !grown.cls.includes("ht-marquee"), grown.cls);
+  check("the whole translation is on screen", grown.hides === 0, `${grown.hides}px still hidden`);
+  check("the box grew downwards, not sideways", grown.h > sliding.h && grown.w === sliding.w,
+    JSON.stringify(grown));
+  await ev(`chrome.storage.sync.set({clippedLines: 'fit'})`);
+  await sleep(700);
+  check("and switching back puts the page's own size back",
+    (await shapeOf(SEL.pinned)).w === sliding.w && (await shapeOf(SEL.pinned)).h === sliding.h);
+  await ctrlTap(SEL.pinned, 6000);
+
+  console.log("\ngrowing only where the page has room for it");
+  await ev(`chrome.storage.sync.set({clippedLines: 'fit'})`);
+  await sleep(500);
+  // Document-relative: a tap scrolls its row into view, so a viewport-relative bottom would move
+  // with the scroll rather than with the layout this is asking about.
+  const menuBottomAt = () => ev(`Math.round(${SEL.menu}.getBoundingClientRect().bottom + scrollY)`);
+  const menuBottom = await menuBottomAt();
+  await ctrlTap(SEL.menu);
+  check("a row with slack the page already had grows into it",
+    (await shape()).cls.includes("ht-unclipped"), (await shape()).cls);
+  check("and the row still ends where it did, so nothing below it moved",
+    (await menuBottomAt()) === menuBottom, `${await menuBottomAt()} vs ${menuBottom}`);
+  await ctrlTap(SEL.menu, 6000);
+
+  // The sidebar case that started this: a row as tall as its one line has no room to give, and
+  // taking it would push every row below down.
+  const pinnedHeight = await ev(`Math.round(${SEL.pinned}.getBoundingClientRect().height)`);
+  await ctrlTap(SEL.pinned);
+  const pinnedBox = await ev(`(() => { const el = ${SEL.pinned}.querySelector('.menu-label');
+    return { cls: el.className, boxBottom: Math.round(el.getBoundingClientRect().bottom),
+             blockBottom: Math.round(${SEL.pinned}.getBoundingClientRect().bottom),
+             height: Math.round(${SEL.pinned}.getBoundingClientRect().height) }; })()`);
+  console.log("   a row built around its line:", JSON.stringify(pinnedBox));
+  check("a row built around its one line slides rather than shoving the page down",
+    pinnedBox.cls.includes("ht-marquee") && !pinnedBox.cls.includes("ht-unclipped"), pinnedBox.cls);
+  check("and it is still one line tall", pinnedBox.height === pinnedHeight,
+    `${pinnedBox.height} vs ${pinnedHeight}`);
+  check("and it stayed inside the box the page drew",
+    pinnedBox.boxBottom <= pinnedBox.blockBottom + 1, JSON.stringify(pinnedBox));
+  await ctrlTap(SEL.pinned, 6000);
+  await ev(`chrome.storage.sync.set({clippedLines: 'fit'})`);
+  await sleep(500);
+
   console.log("\nskips and exclusions");
   const preBefore = await ev(`${SEL.pre}.textContent`);
   await ctrlTap(SEL.pre, 2000).catch(() => {});
@@ -387,6 +576,15 @@ try {
   await ctrlTap(SEL.en, 8000);
   check("english left alone", (await ev(`${SEL.en}.textContent`)) === enBefore);
   check("english reported as skipped", (await status())?.engine === "skipped", JSON.stringify(await status()));
+
+  // aria-hidden on a container is not a refusal: pages leave it on regions they are still drawing.
+  const staleBefore = await ev(`${SEL.stale}.textContent`);
+  await ctrlTap(SEL.stale, 8000);
+  check("a row a page only claims is hidden is still translated",
+    (await ev(`${SEL.stale}.textContent`)) !== staleBefore,
+    JSON.stringify(await ev(`${SEL.stale}.textContent`)));
+  check("and the link it sits in is still a link",
+    (await ev(`Boolean(${SEL.stale}.querySelector('a'))`)) === true);
 
   console.log("\nescape restores the page");
   const esc = { key: "Escape", code: "Escape", windowsVirtualKeyCode: 27, nativeVirtualKeyCode: 27 };

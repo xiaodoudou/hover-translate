@@ -112,3 +112,44 @@
   text-underline-offset: 2px !important;
   text-decoration-skip-ink: none !important;
 }
+
+/* A page clips a one-line box to the width its own language needed, so a longer translation ends up
+   behind the ellipsis. Those lines slide, which marquee.js drives: only it can measure how far the
+   line has to go, and only it can hold the tail in view while the pointer stays and rewind from
+   wherever the line got to when it goes. All that is left here is the ellipsis, which marks a cut
+   that is not there while the line is out. */
+.ht-marquee-moving {
+  text-overflow: clip !important;
+}
+
+/* The wrapper the line is moved by. inline-block because a transform does not apply to a plain
+   inline box, and because it has to shrink to the width of the text rather than the box. will-change
+   asks for a layer of its own up front: without it the first frame of every lap is spent making one.
+   The resets are because this lands inside arbitrary page markup, where a rule meant for the page's
+   own spans would otherwise reach it. */
+.ht-marquee-line {
+  display: inline-block !important;
+  vertical-align: baseline !important;
+  white-space: inherit !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: none !important;
+  font: inherit !important;
+  color: inherit !important;
+  text-indent: 0 !important;
+  will-change: transform;
+}
+
+/* The other answer: keep the line and let the box grow. It grows downwards only, wrapping inside the
+   width the page gave it, because that is the growth a page can usually absorb. Widening the box is
+   what would push the rest of the layout out of place. */
+.ht-unclipped {
+  overflow: visible !important;
+  white-space: normal !important;
+  text-overflow: clip !important;
+  overflow-wrap: break-word !important;
+  height: auto !important;
+  max-height: none !important;
+  -webkit-line-clamp: none !important;
+}

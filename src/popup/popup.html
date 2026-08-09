@@ -39,6 +39,16 @@
       <option value="bubble">A bubble, leaving the page alone</option>
     </select>
 
+    <label for="clipped">Scroll clipped lines</label>
+    <select id="clipped">
+      <option value="fit">Enable (default)</option>
+      <option value="grow">Disable</option>
+    </select>
+    <p class="hint italic">A translation is longer than the line a page cut to one width. Enabled,
+    the line scrolls while you point at it, unless the page left room around the box, which it takes
+    instead; a menu row is built around its one line and has none, so it scrolls. Disabled always
+    grows the box.</p>
+
     <label>Provider</label>
     <ul id="providers" class="providers"></ul>
     <div class="inline end">

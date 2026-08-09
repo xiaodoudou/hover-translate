@@ -77,6 +77,54 @@ Each one is shown in the demo above, in order, before the image at the end.
 Bilingual mode appends the translated text and nothing else, in a single `<span>`, so the original
 is left exactly as it was.
 
+## Lines the page cut to one width
+
+A page cuts its one-line boxes to fit the language it shipped with, so a longer translation ends up
+behind the ellipsis; a sidebar menu is the usual case. There are only two honest answers, and
+**Scroll clipped lines** in the popup picks between them.
+
+| Setting | What happens to a line that no longer fits |
+| --- | --- |
+| **Enable** | The default. The line scrolls, unless the page left room around the box, which it takes instead |
+| **Disable** | The box always grows |
+
+There was a third setting that always scrolled and never took the room. It is gone, because next to
+nothing told the two apart: a menu row is built around its single line and has none to give, so it
+scrolls either way. They only parted company where a page left slack, and taking slack costs the
+page nothing. Anything still stored under the old name reads as the default.
+
+Sliding is a `text-indent` inside the box the page already drew: no width changes, no node is added,
+and the page's own ellipsis comes back when the line is home.
+
+A lap carries the line from off the right edge of the box to off the left one, at one steady 50px/s,
+for as long as you are pointing at the row. Because both ends of a lap are off screen the wrap has
+no seam, and because it never stops there is nothing for a reader to wait out. It holds still for
+two seconds first, so the beginning can be read where you were already looking, and it keeps the
+page's own ellipsis until it actually sets off.
+
+Sliding is a `transform` on a wrapper span, the one node this extension adds to a page, and only
+inside a box whose text it has already replaced. That is what makes it smooth: `text-indent` is a
+layout property, so animating it relaid the line out on the main thread every frame, and anything
+else busy there left the text standing still and then arriving late in one jump. A transform on its
+own layer belongs to the compositor and page script cannot stall it. The wrapper is stripped when
+the block is reverted, along with the animation.
+
+It runs while the pointer is anywhere in the block rather than only on the box itself; a menu row is
+130px wide and 24px tall, so anything smaller stops every time a hand drifts, and leaving is given
+300ms of grace before the line is handed back. That is also why the movement is driven from the
+content script rather than by a `:hover` rule: a CSS animation starts over every time its selector
+matches again. Under `prefers-reduced-motion` nothing moves.
+
+Growing wraps the line inside the width the page gave it, so the column stays where it is and only
+the height changes.
+
+**Only if no space** means room the page already had, not room it can be made to give. A sidebar row
+is as tall as the one line in it, so a second line pushes every row below it down and the column
+reflows under the reader; that is not free, so those lines slide. A box with slack, a row taller
+than its text, grows into it. What that costs is measured rather than guessed: the box has to end up
+showing the whole line, the block it sits in has to end exactly where it ended before, and nothing
+above it may clip the new lines away. When any of that fails the line slides instead.
+
 While a request is in flight a blue gradient sweeps along the bottom edge of the block. It is painted
 as a background, not a border, an outline or an appended element, so it adds no height, shifts nothing
 and inserts no node. Once the text is replaced nothing is left behind.
@@ -124,8 +172,8 @@ Two browser tests need the folder served over http, because ES module imports do
 python -m http.server 8731
 ```
 
-- `http://localhost:8731/test/harness.html` runs `block.js`, `richtext.js` and `script.js` against the
-  fixture DOM.
+- `http://localhost:8731/test/harness.html` runs `block.js`, `richtext.js`, `marquee.js` and
+  `script.js` against the fixture DOM.
 - `http://localhost:8731/test/e2e.html` runs the whole content script over the fixture, translating
   through live endpoints, with only the `chrome.*` APIs stubbed.
 - `test/fixture.html` is the manual page: open it with the extension loaded and hover through it.

@@ -17,6 +17,7 @@
   .create-time { font-weight: 700; }
   .flexy { display: flex; gap: .5rem; align-items: center; }
   .clipped { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 22rem; }
+  .menu-label { display: block; width: 150px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 </style>
 </head>
 <body>
@@ -133,6 +134,31 @@ things that must stay untouched.</p>
   <p class="expect">A flex parent would lay the added line out beside the text, and a nowrap and
   overflow-hidden parent would clip it away. In both cases the translation has to end up on its own
   readable line below the original.</p>
+</section>
+
+<h2>Lines the page cuts to one width</h2>
+<section>
+  <div id="menu-item" style="height: 64px"><span class="menu-label" lang="zh-CN">乐高幻影忍者人仔套装</span></div>
+  <p class="expect">A sidebar menu, sized for Chinese. The block is the div, but the box that clips
+  is the span inside it, and the English line is half as long again. In the replace modes the line
+  has to slide while the pointer is on it instead of staying behind the ellipsis. This row is 64px
+  tall for one 27px line, so a second line is room the page already had: set to grow, it wraps into
+  that slack and nothing on the page moves.</p>
+
+  <div id="menu-pinned"><span class="menu-label" lang="zh-CN">乐高星球大战人仔套装</span></div>
+  <p class="expect">The same row, as tall as the one line it holds, which is how a sidebar is built.
+  Growing it would push everything below it down, so that is not room the page had spare and "only
+  if no space" has to slide this one.</p>
+</section>
+
+<h2>Regions the page only says are hidden</h2>
+<section>
+  <ul id="stale-region" aria-hidden="true">
+    <li><h4><i class="cat-icon"></i><a href="#" lang="zh-CN">哈利波特</a></h4></li>
+  </ul>
+  <p class="expect">A shop sidebar drawn expanded while its accordion still reports
+  aria-hidden="true". The words are on screen, so Ctrl over the row has to translate it. A dialog
+  marks the whole page behind it exactly the same way.</p>
 </section>
 
 <h2>Things that must never be touched</h2>

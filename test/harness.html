@@ -3,18 +3,22 @@
 <head>
 <meta charset="utf-8">
 <title>Hover Translate logic harness</title>
+<!-- The clipped-line handling is CSS and JS together: the module measures and marks, the stylesheet
+     moves or grows the box. Without this the marking would be checked against nothing. -->
+<link rel="stylesheet" href="../src/styles/content.css">
 <style>
   body { font: 14px/1.6 system-ui, sans-serif; margin: 2rem; }
   #results { font-family: ui-monospace, monospace; white-space: pre-wrap; }
   .pass { color: #15803d; } .fail { color: #b91c1c; font-weight: 700; }
   #stage { border: 1px solid #e2e8f0; padding: 1rem; margin-top: 2rem; opacity: .5; }
+  .clip { display: block; width: 120px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 </style>
 </head>
 <body>
 <h1>Logic harness</h1>
-<p>Runs the real <code>block.js</code>, <code>richtext.js</code> and <code>script.js</code> against the
-fixture DOM. Serve the extension folder over http and open this page: module imports do not work from
-<code>file://</code>.</p>
+<p>Runs the real <code>block.js</code>, <code>richtext.js</code>, <code>marquee.js</code> and
+<code>script.js</code> against the fixture DOM. Serve the extension folder over http and open this
+page: module imports do not work from <code>file://</code>.</p>
 <div id="results">running...</div>
 <div id="stage"></div>
 
@@ -23,6 +27,7 @@ import { resolveBlock } from "../src/content/block.js";
 import { resolveImage, imageUrl, showImageOverlay, hideImageOverlay, hideAllImageOverlays, hasImageOverlay,
          showImagePending, hideImagePending } from "../src/content/image.js";
 import { serialize, applyInPlace, rebuild } from "../src/content/richtext.js";
+import { markOverflow, clearOverflow, setClippedLines } from "../src/content/marquee.js";
 import { hasScriptForeignTo, pickLanguage, languageFromScript } from "../src/lib/script.js";
 import { installHover } from "../src/content/hover.js";
 
@@ -56,6 +61,12 @@ check("text node inside a paragraph resolves to the paragraph",
 check("code inside pre is refused", resolveBlock(q("pre code")) === null);
 check("icon font is refused", resolveBlock(q("i.fa")) === null);
 check("aria-hidden decoration is refused", resolveBlock(q('span[aria-hidden="true"]')) === null);
+// The attribute speaks for the element it is on, not for everything under it: a dialog marks the
+// page behind it aria-hidden while leaving it on screen, and Taobao's sidebar marks every category
+// panel aria-hidden while showing it expanded.
+const staleRow = q("#stale-region a").firstChild;
+check("a row inside a region only claimed to be hidden still resolves",
+  resolveBlock(staleRow)?.tagName === "H4", String(resolveBlock(staleRow)?.tagName));
 check("notranslate paragraph is refused", resolveBlock(q("p.notranslate")) === null);
 check("textarea is refused", resolveBlock(q("textarea")) === null);
 const li = byText("li", "Eerste punt");
@@ -423,6 +434,136 @@ shadowRoot.innerHTML = `<div id="shadow-msg">不太明白您的意思</div>`;
 check("the node inside a shadow root resolves to itself",
   resolveBlock(shadowRoot.getElementById("shadow-msg"))?.id === "shadow-msg");
 check("the host on its own resolves to nothing", resolveBlock(shadowHost) === null);
+
+// --- lines the page cuts to one width -------------------------------------
+// The box that clips is rarely the block that was translated: a sidebar clips the label inside it.
+// That box is the one that may slide, and only by exactly what it hides.
+const menu = document.createElement("div");
+menu.innerHTML = `<span class="clip">A translated line far too long for this box</span>`;
+document.getElementById("stage").append(menu);
+const label = menu.firstElementChild;
+const menuView = menu.firstElementChild.clientWidth;
+const menuLine = menu.firstElementChild.scrollWidth;
+markOverflow(menu);
+const runner = label.querySelector(".ht-marquee-line");
+const slide = runner?.getAnimations().find((a) => a.id === "ht-marquee");
+const frames = slide?.effect.getKeyframes().map((f) => Math.round(parseFloat(f.transform.match(/-?[\d.]+/)[0])));
+check("the box that clips is marked, not the block around it",
+  label.classList.contains("ht-marquee") && !menu.classList.contains("ht-marquee"));
+check("the line is moved by a transform, which the compositor runs, not by relaying it out",
+  !!runner && frames?.length === 2, String(runner?.className));
+check("a lap starts with the line off the right edge of the box",
+  frames && frames[0] === menuView, JSON.stringify(frames));
+check("and ends with it gone past the left one, so the wrap has no seam",
+  frames && frames[1] === -menuLine, JSON.stringify(frames));
+check("and it waits for the pointer instead of moving on its own", slide?.playState === "paused",
+  slide?.playState);
+check("waiting exactly where the page drew the line, not off the edge of the box",
+  runner.getBoundingClientRect().left === label.getBoundingClientRect().left,
+  `${runner.getBoundingClientRect().left} vs ${label.getBoundingClientRect().left}`);
+
+// Where the glyphs actually are. Asserting the property alone would pass on a line that never moved
+// a pixel on screen.
+const charAt = () => {
+  const text = document.createTreeWalker(label, NodeFilter.SHOW_TEXT).nextNode();
+  const r = document.createRange();
+  r.setStart(text, 0);
+  r.setEnd(text, 1);
+  return Math.round(r.getBoundingClientRect().left - label.getBoundingClientRect().left);
+};
+const walk = [];
+// Not a sample at 1: the lap is half open, and that instant belongs to the next one.
+for (const t of [0, 0.25, 0.5, 0.75, 0.999]) {
+  slide.currentTime = t * slide.effect.getComputedTiming().duration;
+  walk.push(charAt());
+}
+slide.cancel();
+check("the text itself travels, every sample left of the one before",
+  walk.every((x, i) => i === 0 || x < walk[i - 1]), JSON.stringify(walk));
+check("starting off the right of the box and ending off the left",
+  walk[0] === menuView && Math.abs(walk[4] + menuLine) <= 1, JSON.stringify(walk));
+const wasHtml = label.innerHTML;
+clearOverflow(menu);
+check("reverting takes the marker and the movement with it",
+  !label.classList.contains("ht-marquee") && label.getAnimations().length === 0,
+  String(label.getAnimations().length));
+check("and the wrapper it moved, leaving the box the way it was found",
+  !label.querySelector(".ht-marquee-line") && label.childNodes.length === 1 &&
+    label.firstChild.nodeType === Node.TEXT_NODE,
+  `${wasHtml} -> ${label.innerHTML}`);
+
+const fits = document.createElement("div");
+fits.innerHTML = `<span class="clip" style="width: 400px">Short line</span>`;
+document.getElementById("stage").append(fits);
+markOverflow(fits);
+check("a line that fits is left alone", fits.querySelectorAll(".ht-marquee").length === 0);
+
+// text-indent moves the first line of a block container. In a flex box it would indent each item's
+// own text rather than slide the row, so those keep their ellipsis.
+const row = document.createElement("div");
+row.innerHTML = `<div style="display:flex;width:120px;overflow:hidden;white-space:nowrap">` +
+  `<span>A translated line far too long for this box</span></div>`;
+document.getElementById("stage").append(row);
+markOverflow(row);
+check("a flex row that clips is left alone", row.querySelectorAll(".ht-marquee").length === 0);
+
+// The other answer: keep the line and let the box grow. It grows downwards, inside the width the
+// page gave it, so the column stays where it is.
+setClippedLines("grow");
+markOverflow(menu);
+check("set to grow, the box wraps rather than the line sliding",
+  label.classList.contains("ht-unclipped") && !label.classList.contains("ht-marquee"));
+check("and the whole line is on screen", label.scrollWidth <= label.clientWidth,
+  `${label.scrollWidth} vs ${label.clientWidth}`);
+check("at the width the page gave it", Math.round(label.getBoundingClientRect().width) === 120,
+  String(label.getBoundingClientRect().width));
+clearOverflow(menu);
+check("and it goes away again with the translation",
+  !label.classList.contains("ht-unclipped") && label.getAttribute("style") === null);
+
+// Only if no space: the same growth, but only where the page had the room already. A row built
+// around its one line has none: growing it moves everything below it.
+setClippedLines("fit");
+const roomy = document.createElement("div");
+roomy.style.cssText = "height: 80px";
+roomy.innerHTML = `<span class="clip">A translated line far too long for this box</span>`;
+document.getElementById("stage").append(roomy);
+const roomyBottom = roomy.getBoundingClientRect().bottom;
+markOverflow(roomy);
+check("set to fit, a box with slack the page already had grows into it",
+  roomy.firstElementChild.classList.contains("ht-unclipped"));
+check("and the block it sits in still ends where it did",
+  roomy.getBoundingClientRect().bottom === roomyBottom,
+  `${roomy.getBoundingClientRect().bottom} vs ${roomyBottom}`);
+clearOverflow(roomy);
+
+// The sidebar case: the row is as tall as its line, so a second one would push the page around.
+const tight = document.createElement("div");
+tight.innerHTML = `<span class="clip">A translated line far too long for this box</span>`;
+document.getElementById("stage").append(tight);
+const tightHeight = tight.getBoundingClientRect().height;
+markOverflow(tight);
+check("but a row built around its one line slides, rather than shoving the page down",
+  tight.firstElementChild.classList.contains("ht-marquee") &&
+    !tight.firstElementChild.classList.contains("ht-unclipped"));
+check("and the growth it tried was undone",
+  tight.getBoundingClientRect().height === tightHeight,
+  `${tight.getBoundingClientRect().height} vs ${tightHeight}`);
+clearOverflow(tight);
+
+const pinned = document.createElement("div");
+pinned.style.cssText = "height: 20px; overflow: hidden";
+pinned.innerHTML = `<span class="clip">A translated line far too long for this box</span>`;
+document.getElementById("stage").append(pinned);
+const oneLine = pinned.firstElementChild.getBoundingClientRect().height;
+markOverflow(pinned);
+check("and so does a box pinned to one line's height, rather than spilling out of it",
+  pinned.firstElementChild.classList.contains("ht-marquee") &&
+    !pinned.firstElementChild.classList.contains("ht-unclipped"));
+check("with the growth it tried undone too",
+  pinned.firstElementChild.getBoundingClientRect().height === oneLine,
+  `${pinned.firstElementChild.getBoundingClientRect().height} vs ${oneLine}`);
+clearOverflow(pinned);
 
 // --- the trigger: one tap, or two -----------------------------------------
 // holdDelay is set out of reach so sweep mode never starts: what is under test here is the tap.

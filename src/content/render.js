@@ -1,10 +1,14 @@
 import { ATTR_STATE, CLASS_TRANSLATED, CLASS_BILINGUAL, CLASS_PENDING, CLASS_ERROR } from "../lib/rules.js";
+import { markOverflow, clearOverflow } from "./marquee.js";
 
 // How to put each block back, as a closure: the two apply paths undo differently.
 const undos = new WeakMap();
 // Original child nodes, kept alive by reference so the rebuild path restores identity, not a copy.
 const saved = new WeakMap();
 const translated = new Set();
+// The blocks whose own text was rewritten, so a line of theirs that no longer fits is ours to deal
+// with. Bilingual mode is deliberately not among them: it adds a line and leaves the page's alone.
+const replaced = new Set();
 
 export function isTranslated(el) {
   return el.getAttribute(ATTR_STATE) === "translated";
@@ -69,6 +73,8 @@ export function applyEdits(block, edits) {
     for (let i = edits.length - 1; i >= 0; i--) edits[i][0].nodeValue = edits[i][1];
   });
   mark(block);
+  replaced.add(block);
+  markOverflow(block);
 }
 
 // Bubble mode: the page is not touched at all, so the only thing to undo is dismissing the overlay.
@@ -106,15 +112,28 @@ export function apply(block, content) {
   undos.set(block, () => block.replaceChildren(...nodes));
   block.replaceChildren(content);
   mark(block);
+  replaced.add(block);
+  markOverflow(block);
+}
+
+// Whatever is already translated follows the setting straight away, rather than waiting for the
+// next block to be translated before it looks right.
+export function refreshOverflow() {
+  for (const block of replaced) {
+    clearOverflow(block);
+    markOverflow(block);
+  }
 }
 
 export function revert(block) {
   const undo = undos.get(block);
   if (!undo) return false;
+  clearOverflow(block);
   undo();
   undos.delete(block);
   saved.delete(block);
   translated.delete(block);
+  replaced.delete(block);
   block.removeAttribute(ATTR_STATE);
   block.classList.remove(CLASS_TRANSLATED, CLASS_PENDING, CLASS_ERROR, ...MARKER_CLASSES);
   if (block.getAttribute("class") === "") block.removeAttribute("class");
