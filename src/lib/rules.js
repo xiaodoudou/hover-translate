@@ -32,11 +32,13 @@ export const STAY_ORIGINAL_TAGS = new Set([
 ]);
 
 // Elements that must never become a hover target: icon fonts, syntax highlighting, decoration.
+// Every one of these speaks for its subtree. aria-hidden is deliberately not among them, because it
+// does not: see the note in block.js.
 export const HOVER_EXCLUDE_SELECTORS = [
   "rp", "rt", ".prism-code", ".enlighter-code", ".rc-CodeBlock", '[role="code"]',
   "table.highlight", 'div[class^="codeBlockContent"]', 'div[class^="codeBlockLines"]',
   ".material-icons", "material-icon", "i.fa", 'i[class^="fa-"]',
-  ".google-symbols.notranslate", '[aria-hidden="true"]', ".notranslate",
+  ".google-symbols.notranslate", ".notranslate",
   '[translate="no"]',
 ];
 
@@ -54,4 +56,12 @@ export const CLASS_TRANSLATED = "ht-translated";
 export const CLASS_BILINGUAL = "ht-bilingual";
 export const CLASS_PENDING = "ht-pending";
 export const CLASS_ERROR = "ht-error";
+export const CLASS_MARQUEE = "ht-marquee";
+// The one node this extension adds to a page, and only inside a box whose text it already replaced:
+// a transform needs an element to move, and moving a layout property instead costs a relayout of
+// the line on every frame.
+export const CLASS_MARQUEE_LINE = "ht-marquee-line";
+// Only while the line is actually moving: the ellipsis marks a cut that is not there mid-slide.
+export const CLASS_MARQUEE_MOVING = "ht-marquee-moving";
+export const CLASS_UNCLIPPED = "ht-unclipped";
 export const ATTR_STATE = "data-ht-state";

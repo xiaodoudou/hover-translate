@@ -1,4 +1,4 @@
-import { getSettings, setSettings } from "../lib/settings.js";
+import { getSettings, setSettings, DEFAULTS } from "../lib/settings.js";
 
 const LANGUAGES = [
   ["en", "English"], ["zh", "Chinese"], ["zh-Hant", "Chinese (traditional)"], ["ja", "Japanese"],
@@ -142,6 +142,10 @@ async function main() {
   const settings = await getSettings();
   $("target").value = settings.targetLang;
   $("mode").value = settings.displayMode;
+  $("clipped").value = settings.clippedLines;
+  // Anyone still holding the "always slide" setting that was dropped lands on the default rather
+  // than on a select showing nothing.
+  if (!$("clipped").value) $("clipped").value = DEFAULTS.clippedLines;
   $("trigger").value = triggerValue(settings.triggerKey, settings.triggerTaps);
 
   let currentOrder = settings.providerOrder;
@@ -303,6 +307,7 @@ async function main() {
 
   $("target").addEventListener("change", (e) => setSettings({ targetLang: e.target.value }));
   $("mode").addEventListener("change", (e) => setSettings({ displayMode: e.target.value }));
+  $("clipped").addEventListener("change", (e) => setSettings({ clippedLines: e.target.value }));
   $("trigger").addEventListener("change", (e) => {
     const [key, taps] = e.target.value.split(":");
     setSettings({ triggerKey: key, triggerTaps: Number(taps) });

@@ -5,6 +5,14 @@ export const DEFAULTS = {
   // both:   keep the original and add the translation underneath it
   // bubble: leave the page alone and show the translation in an overlay
   displayMode: "replace",
+  // A page clips its one-line boxes to fit its own language, so a longer translation ends up behind
+  // the ellipsis. Either the box keeps its size and the line moves, or the line stays put and the
+  // box grows; there is no third answer, and this picks between them.
+  // fit:  slide the line, except where the page left room around the box, which it takes instead
+  // grow: always grow the box, never move the line
+  // Anything else reads as fit, which is how the "always slide" setting this once had retires: it
+  // only ever differed where a page left slack, and taking slack costs the page nothing.
+  clippedLines: "fit",
   triggerKey: "Control", // Control | Alt | Shift
   // 1 fires on a single tap, 2 requires the key tapped twice. Two taps are far harder to hit by
   // accident, which is the point: a modifier gets pressed constantly for reasons of its own.

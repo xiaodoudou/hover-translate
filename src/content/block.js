@@ -28,6 +28,13 @@ function isCodeBlock(el) {
 
 // True if the node sits anywhere inside something we must never rewrite.
 function isExcluded(el) {
+  // aria-hidden marks decoration, so the element under the pointer is taken at its word. It is not
+  // allowed to speak for everything beneath it, though: pages carry it on whole regions they are
+  // still drawing. A dialog marks the page behind it aria-hidden while leaving it on screen, and
+  // Taobao's shop sidebar marks every category panel aria-hidden while showing it expanded, which
+  // refused every row in it.
+  if (el.getAttribute("aria-hidden") === "true") return true;
+
   for (let n = el; n && n !== document.documentElement; n = n.parentElement) {
     if (n.tagName === "PRE" ? isCodeBlock(n) : EXCLUDE_TAGS.has(n.tagName)) return true;
     if (n.isContentEditable) return true;

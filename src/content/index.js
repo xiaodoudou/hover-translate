@@ -13,15 +13,21 @@ import { serialize, applyInPlace, rebuild } from "./richtext.js";
 import { installHover } from "./hover.js";
 import { toast } from "./toast.js";
 import { showBubble, hideBubble } from "./bubble.js";
+import { setClippedLines } from "./marquee.js";
 import * as render from "./render.js";
 import { translateTexts } from "../engine/index.js";
 import { getSettings, onSettingsChanged, DEFAULTS } from "../lib/settings.js";
 
 const settings = { ...DEFAULTS, ...(await getSettings().catch(() => ({}))) };
 render.setMarker(settings.displayMode);
+setClippedLines(settings.clippedLines);
 onSettingsChanged((patch) => {
   Object.assign(settings, patch);
   if ("displayMode" in patch) render.setMarker(patch.displayMode);
+  if ("clippedLines" in patch) {
+    setClippedLines(patch.clippedLines);
+    render.refreshOverflow();
+  }
 });
 
 const inFlight = new WeakSet();
