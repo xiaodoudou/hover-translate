@@ -56,21 +56,23 @@ the failover moves on to Lens.
 | --- | --- |
 | Hover text, tap <kbd>Ctrl</kbd> | Translates the block under the pointer |
 | Hover an image, tap <kbd>Ctrl</kbd> | Reads the image and lays the translation over it |
-| Hold <kbd>Ctrl</kbd> | Outlines the block that would be translated, and translates nothing |
+| Hold <kbd>Ctrl</kbd> | Translates nothing, and outlines the block that would be, if you asked for that |
 | Tap <kbd>Ctrl</kbd> on a translated block or image | Restores it |
 | <kbd>Esc</kbd> | Restores every block and image on the page |
-
-While the key is down, the block it would act on is outlined, so you can see what you are about to
-translate and let go if it is the wrong one. It is the same block the trigger itself resolves, not a
-guess at it, so no outline means nothing would happen there. It is an outline rather than a border
-because an outline is painted outside the box and takes no space at all: the element keeps its size,
-nothing reflows, and no word moves under the pointer while you are aiming at it. On a double-tap
-trigger only the second press outlines anything, since the first one does nothing.
 
 Nothing happens until you let go, so holding the key is how you aim and releasing it is how you
 commit; a press you think better of costs nothing. Shortcuts are unaffected: pressing
 any second key, clicking or scrolling while the trigger key is down cancels the press, so
 <kbd>Ctrl</kbd>+C, <kbd>Ctrl</kbd>+click and <kbd>Ctrl</kbd>+scroll all behave normally.
+
+"Outline what would be translated" in the popup shows you what you are aiming at while the key is
+down. It is off by default, since the key is held for a moment before every translation and most of
+the time you already know what you are pointing at; turn it on while you are learning what a tap
+takes. It is the same block the trigger itself resolves, not a guess at it, so no outline means
+nothing would happen there. It is an outline rather than a border because an outline is painted
+outside the box and takes no space at all: the element keeps its size, nothing reflows, and no word
+moves under the pointer while you are aiming at it. On a double-tap trigger only the second press
+outlines anything, since the first one does nothing.
 
 ## Display modes
 

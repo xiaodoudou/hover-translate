@@ -298,8 +298,9 @@ installHover({
   },
   // Resolved the same way the trigger resolves it, so the outline is the block that would actually
   // be translated rather than a guess at it. Nothing resolved means nothing would happen, and
-  // showing no outline says exactly that.
-  onAim: (target) => render.aim(target ? resolveBlock(target) : null),
+  // showing no outline says exactly that. Called with the setting off too, so an outline drawn
+  // before it was turned off still gets cleared.
+  onAim: (target) => render.aim(settings.aimOutline && target ? resolveBlock(target) : null),
   onEscape: () => {
     render.clearAim();
     hideBubble();

@@ -85,6 +85,15 @@
     </select>
     <p class="hint italic">Tapping twice is harder to trigger by accident.</p>
 
+    <label for="aim">Outline what would be translated</label>
+    <select id="aim">
+      <option value="no">No</option>
+      <option value="yes">Yes</option>
+    </select>
+    <p class="hint italic">While the key is held, outlines the block that releasing it would
+    translate, so you can move off the wrong one before you let go. Where nothing is outlined,
+    nothing would happen. The outline is painted outside the box and moves no text.</p>
+
     <label for="minloading">Show loading for at least <output id="minloading-value"></output></label>
     <input type="range" id="minloading" min="0" max="2000" step="100">
     <p class="hint italic">This setting does not impact translation time.</p>

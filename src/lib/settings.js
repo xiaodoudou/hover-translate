@@ -17,6 +17,10 @@ export const DEFAULTS = {
   // 1 fires on a single tap, 2 requires the key tapped twice. Two taps are far harder to hit by
   // accident, which is the point: a modifier gets pressed constantly for reasons of its own.
   triggerTaps: 1,
+  // Whether holding the key outlines the block it would act on. Off by default: the key is held
+  // before every translation, so an outline that is always on is a box drawn on the page nearly
+  // every time. Worth having while learning what a tap takes, and worth turning off after that.
+  aimOutline: false,
   // Not exposed: how long the second tap may arrive after the first.
   doubleTapMs: 400,
   // Off until asked for: reading images needs a host permission the extension does not install
