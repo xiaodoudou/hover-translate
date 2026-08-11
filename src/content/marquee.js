@@ -168,9 +168,11 @@ function handleTall(el, block) {
     return false;
   }
   if (!CLIPPED.has(style.overflowY)) return false;
+  // Measured on whichever of the two holds the text, since a row and the title inside it can be set
+  // in different sizes, and the question here is always how many lines of the text the box shows.
+  const line = lineHeight(el.contains(block) ? block : el);
   // A box a few pixels shorter than its content is rounding, or a descender under the edge. A line
   // of a sentence is what this is for.
-  const line = lineHeight(el, style);
   if (el.scrollHeight - el.clientHeight < line * 0.6) return false;
   // And a box measured in lines is a title the page capped. A tall one is a region of the page that
   // happens to hide its overflow, and moving a whole region past a window, or growing one, would be
@@ -184,8 +186,7 @@ function handleTall(el, block) {
   // lines and undoing the wrap would leave the rest of the box empty. A box that hides what runs
   // past its bottom but not what runs past its side is left to rise as well, since one long line
   // there is a line it would have to grow a scrollbar for.
-  const content = lineHeight(el.contains(block) ? block : el);
-  const across = CLIPPED.has(style.overflowX) && el.clientHeight <= content * 1.5;
+  const across = CLIPPED.has(style.overflowX) && el.clientHeight <= line * 1.5;
   slide(el, block, across ? "flat" : "y");
   return true;
 }
