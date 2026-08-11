@@ -1,4 +1,4 @@
-import { EXCLUDE_TAGS, STAY_ORIGINAL_TAGS } from "../lib/rules.js";
+import { EXCLUDE_TAGS, STAY_ORIGINAL_TAGS, tagOf } from "../lib/rules.js";
 import { escapeText } from "../lib/entities.js";
 
 // Serialises a block into numbered <bN>…</bN> tags, sends it as one string, and rebuilds the block
@@ -46,7 +46,7 @@ export function serialize(block) {
 
       // Opaque elements are sent as an empty pair: their contents are never exposed to a provider
       // and come back byte for byte. A self-closing <bN/> gets mangled, an empty pair does not.
-      const opaque = EXCLUDE_TAGS.has(node.tagName) || STAY_ORIGINAL_TAGS.has(node.tagName);
+      const opaque = EXCLUDE_TAGS.has(tagOf(node)) || STAY_ORIGINAL_TAGS.has(tagOf(node));
       const index = elements.length;
       elements.push({ node, opaque });
       out += `<b${index}>`;

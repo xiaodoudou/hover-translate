@@ -56,9 +56,17 @@ the failover moves on to Lens.
 | --- | --- |
 | Hover text, tap <kbd>Ctrl</kbd> | Translates the block under the pointer |
 | Hover an image, tap <kbd>Ctrl</kbd> | Reads the image and lays the translation over it |
+| Hold <kbd>Ctrl</kbd> | Outlines the block that would be translated |
 | Keep <kbd>Ctrl</kbd> held and move | Translates each block you sweep over |
 | Tap <kbd>Ctrl</kbd> on a translated block or image | Restores it |
 | <kbd>Esc</kbd> | Restores every block and image on the page |
+
+While the key is down, the block it would act on is outlined, so you can see what you are about to
+translate and let go if it is the wrong one. It is the same block the trigger itself resolves, not a
+guess at it, so no outline means nothing would happen there. It is an outline rather than a border
+because an outline is painted outside the box and takes no space at all: the element keeps its size,
+nothing reflows, and no word moves under the pointer while you are aiming at it. On a double-tap
+trigger only the second press outlines anything, since the first one does nothing.
 
 A tap fires when you release the key, so a quick press is enough. Shortcuts are unaffected: pressing
 any second key, clicking or scrolling while the trigger key is down cancels the press, so

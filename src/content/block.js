@@ -5,9 +5,18 @@ import {
   HOVER_EXCLUDE_SELECTOR,
   BLOCK_MAX_TEXT,
   BLOCK_MIN_TEXT,
+  tagOf,
 } from "../lib/rules.js";
+import { scriptsIn } from "../lib/script.js";
 
 const MAX_CLIMB = 12;
+
+// A minimum length keeps a stray letter or a bullet from being a target, but it is a Latin habit:
+// scripts that do not space their words write whole words in one character, and a menu of them was
+// unreachable. One Han character is a word; one Latin letter is not.
+const UNSPACED = new Set(["han", "kana", "hangul"]);
+const enoughText = (text) =>
+  text.length >= BLOCK_MIN_TEXT || scriptsIn(text).some((script) => UNSPACED.has(script));
 
 // A <pre> is refused because it usually holds code, where rewriting the words would be wrong and
 // the whitespace is load bearing. It is not always code, though: chat clients render messages into
@@ -36,7 +45,7 @@ function isExcluded(el) {
   if (el.getAttribute("aria-hidden") === "true") return true;
 
   for (let n = el; n && n !== document.documentElement; n = n.parentElement) {
-    if (n.tagName === "PRE" ? isCodeBlock(n) : EXCLUDE_TAGS.has(n.tagName)) return true;
+    if (tagOf(n) === "PRE" ? isCodeBlock(n) : EXCLUDE_TAGS.has(tagOf(n))) return true;
     if (n.isContentEditable) return true;
     // Text this extension added itself, such as the bilingual line. Never a translation target.
     if (n.hasAttribute("data-ht-ui")) return true;
@@ -53,16 +62,16 @@ function isExcluded(el) {
 // inside <react-partial> and <rails-partial>, which no list of tag names would ever name. A label
 // or a badge inside a table cell stays inline and so does not count.
 function isPassage(el) {
-  if ((el.innerText || "").trim().length < BLOCK_MIN_TEXT) return false;
+  if (!enoughText((el.innerText || "").trim())) return false;
   // A flex or grid parent blockifies whatever it holds, so a row of links reports display:block
   // and would otherwise read as a stack of paragraphs. Taobao's hot-word row is exactly that.
   // For something inline by nature the tag is the honest answer and the computed display is not.
-  if (INLINE_TAGS.has(el.tagName)) return false;
+  if (INLINE_TAGS.has(tagOf(el))) return false;
   let display = "";
   try {
     display = getComputedStyle(el).display;
   } catch {
-    return ALL_BLOCK_TAGS.has(el.tagName);
+    return ALL_BLOCK_TAGS.has(tagOf(el));
   }
   return Boolean(display) && display !== "none" && !display.startsWith("inline");
 }
@@ -102,12 +111,18 @@ export function resolveBlock(node) {
   if (!(el instanceof Element)) return null;
   if (isExcluded(el)) return null;
 
-  for (let depth = 0; el && depth < MAX_CLIMB; el = el.parentElement, depth++) {
+  // Only an element that could be the answer counts towards the limit. A paragraph routinely sits a
+  // dozen spans above its own text node, and counting those hops put it out of reach entirely.
+  for (let seen = 0; el && seen < MAX_CLIMB; el = el.parentElement) {
     if (el === document.body || el === document.documentElement) break;
-    if (!ALL_BLOCK_TAGS.has(el.tagName)) continue;
+    // The tag list names what pages are usually built from; layout answers for everything else. A
+    // feed of custom elements has no tag this list will ever name, and gating on the list alone
+    // walked straight past the post the pointer was on and offered the whole feed instead.
+    if (!ALL_BLOCK_TAGS.has(tagOf(el)) && !isPassage(el)) continue;
+    seen++;
 
     const text = (el.innerText || "").trim();
-    if (text.length < BLOCK_MIN_TEXT) continue;
+    if (!enoughText(text)) continue;
     // A block this big is a container, not a paragraph: refuse rather than rewrite half the page.
     if (text.length > BLOCK_MAX_TEXT) return null;
     // Climbing past a wrapper only reaches bigger wrappers, so this refuses rather than continues.

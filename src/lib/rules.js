@@ -24,6 +24,13 @@ export const EXCLUDE_TAGS = new Set([
   "AUDIO", "VIDEO", "OBJECT", "EMBED",
 ]);
 
+// Every set here is uppercase, and tagName only comes back uppercase for HTML elements. SVG and
+// MathML report the case the document was written in, so an icon is "svg" and a formula is "math",
+// "mrow", "mi". Comparing those raw meant the sets silently never matched them: the elements the
+// lists above promise never to enter were walked into like ordinary prose, and a formula's symbols
+// were sent to a translation engine and written back.
+export const tagOf = (el) => el.tagName.toUpperCase();
+
 // Kept byte-for-byte inside a translated block: passed through as an opaque placeholder.
 export const STAY_ORIGINAL_TAGS = new Set([
   "CODE", "TT", "IMG", "SUP", "SUB", "SAMP", "MATH", "SEMANTICS", "MROW", "MO",
@@ -64,4 +71,6 @@ export const CLASS_MARQUEE_LINE = "ht-marquee-line";
 // Only while the line is actually moving: the ellipsis marks a cut that is not there mid-slide.
 export const CLASS_MARQUEE_MOVING = "ht-marquee-moving";
 export const CLASS_UNCLIPPED = "ht-unclipped";
+// What the trigger would act on, shown while the key is held.
+export const CLASS_AIM = "ht-aim";
 export const ATTR_STATE = "data-ht-state";

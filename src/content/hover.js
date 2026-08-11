@@ -8,7 +8,7 @@
 // With triggerTaps at 2 the key must be tapped twice within doubleTapMs. Only the second press acts:
 // the first is remembered and does nothing, so the modifier keeps its ordinary meaning until the
 // user asks for it twice. Everything after that is identical, holding the second press included.
-export function installHover({ getConfig, onTrigger, onEscape }) {
+export function installHover({ getConfig, onTrigger, onAim, onEscape }) {
   let hovered = null;
   let pointer = null;
   let keyHeld = false;
@@ -34,6 +34,12 @@ export function installHover({ getConfig, onTrigger, onEscape }) {
     return Boolean(at) && at.tagName !== "IFRAME" && at.tagName !== "FRAME";
   };
 
+  // What a release right now would act on, so the user can see it before committing. Only while the
+  // press is armed: on a double-tap trigger the first press does nothing, and showing a target for
+  // it would promise something that is not going to happen.
+  const showAim = () =>
+    onAim?.(keyHeld && armed && !cancelled && inThisFrame() ? hovered : null);
+
   const reset = () => {
     keyHeld = false;
     firedThisPress = false;
@@ -42,6 +48,7 @@ export function installHover({ getConfig, onTrigger, onEscape }) {
     lastFired = null;
     clearTimeout(timer);
     timer = null;
+    onAim?.(null);
   };
 
   // A half-finished pair must not survive the user leaving: coming back to the tab and pressing the
@@ -56,12 +63,16 @@ export function installHover({ getConfig, onTrigger, onEscape }) {
     cancelled = true;
     clearTimeout(timer);
     timer = null;
+    onAim?.(null);
   };
 
   const fire = (target) => {
     if (!target || !inThisFrame()) return;
     firedThisPress = true;
     lastFired = target;
+    // Handed over to the loading state: two markers on one block is noise, and in sweep mode the
+    // aim belongs to whatever the pointer reaches next.
+    onAim?.(null);
     onTrigger(target);
   };
 
@@ -84,7 +95,9 @@ export function installHover({ getConfig, onTrigger, onEscape }) {
       queued = true;
       requestAnimationFrame(() => {
         queued = false;
-        if (keyHeld && armed && !cancelled && hovered !== lastFired) schedule();
+        if (!keyHeld || !armed || cancelled) return;
+        showAim();
+        if (hovered !== lastFired) schedule();
       });
     },
     { passive: true, capture: true },
@@ -107,7 +120,10 @@ export function installHover({ getConfig, onTrigger, onEscape }) {
     reset();
     keyHeld = true;
     armed = triggerTaps !== 2 || paired;
-    if (armed) schedule();
+    if (armed) {
+      showAim();
+      schedule();
+    }
   };
 
   const onKeyUp = (event) => {

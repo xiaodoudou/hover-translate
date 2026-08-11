@@ -92,5 +92,22 @@ check("no innerHTML in the content script graph", !/\.innerHTML\s*=/.test(conten
 check("no eval or Function constructor", !/\beval\(|new Function\(/.test(contentSources));
 check("no remote markup is parsed", !/DOMParser|insertAdjacentHTML/.test(contentSources));
 
+// No network: the reply shapes below are real ones, recorded from the endpoints they came from.
+console.log("\na reply that lost its markers is not mistaken for a good one");
+globalThis.chrome = { runtime: { onMessage: { addListener() {} } } };
+const { keepsMarkers } = await import("../src/background.js");
+const SENT = ["<b0>这是一段</b0>简体中文的<b1>测试文字</b1>。"];
+check("a balanced reply passes",
+  keepsMarkers(SENT, ["<b0>This is a piece</b0> Simplified Chinese<b1> Test text</b1> ."]));
+check("and so does one that moved the markers around, which is allowed",
+  keepsMarkers(SENT, ["<b1>Test text</b1> and <b0>this piece</b0>."]));
+check("a dropped closing marker fails, which is what Google's backup endpoint sends",
+  keepsMarkers(SENT, ["<b0>This is a <b1>test text</b1> in Simplified Chinese."]) === false);
+check("a reply that dropped them all fails",
+  keepsMarkers(SENT, ["This is a test text in Simplified Chinese."]) === false);
+check("so does one that invented a marker nobody sent",
+  keepsMarkers(SENT, ["<b0>a</b0><b1>b</b1><b2>c</b2>"]) === false);
+check("text sent without markers has nothing to lose", keepsMarkers(["plain text"], ["texte brut"]));
+
 console.log(failures === 0 ? "\nALL PASS" : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

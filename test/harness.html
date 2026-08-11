@@ -377,6 +377,60 @@ document.getElementById("stage").append(partials);
 check("blocks held in custom elements still count as passages", resolveBlock(partials) === null,
   String(resolveBlock(partials)?.tagName));
 
+// The tag list names what pages are usually built from, and a feed of custom elements is named by
+// nothing in it. Gating the answer on the list alone walked past the post under the pointer.
+const feed = document.createElement("div");
+feed.innerHTML =
+  `<my-post style="display:block">第一条动态，内容足够长。</my-post>` +
+  `<my-post style="display:block">第二条动态，内容也足够长。</my-post>`;
+document.getElementById("stage").append(feed);
+check("a post laid out as a block resolves to itself, not to the feed",
+  resolveBlock(feed.firstElementChild.firstChild)?.tagName === "MY-POST",
+  String(resolveBlock(feed.firstElementChild.firstChild)?.tagName));
+check("and the feed holding two of them is still refused", resolveBlock(feed) === null,
+  String(resolveBlock(feed)?.tagName));
+
+// The climb counted every ancestor, inline ones included, so a paragraph a dozen spans above its
+// own text was out of reach.
+const buried = document.createElement("p");
+buried.innerHTML = "<span>".repeat(14) + "这段文字被很多 span 包着。" + "</span>".repeat(14);
+document.getElementById("stage").append(buried);
+let innermost = buried;
+while (innermost.firstElementChild) innermost = innermost.firstElementChild;
+check("text buried under fourteen spans still resolves to its paragraph",
+  resolveBlock(innermost.firstChild) === buried, String(resolveBlock(innermost.firstChild)?.tagName));
+
+// A minimum length is a Latin habit. One Han character is a whole word, and a menu of them was
+// refused outright.
+const oneChar = document.createElement("div");
+oneChar.textContent = "赞";
+document.getElementById("stage").append(oneChar);
+check("a single han character is enough to be worth translating", resolveBlock(oneChar) === oneChar,
+  String(resolveBlock(oneChar)));
+const oneLetter = document.createElement("div");
+oneLetter.textContent = "x";
+document.getElementById("stage").append(oneLetter);
+check("but a single latin letter is not", resolveBlock(oneLetter) === null,
+  String(resolveBlock(oneLetter)?.tagName));
+
+// SVG and MathML report their tag name in the document's own case, so every uppercase set here
+// missed them: the never-enter list did nothing and a formula was sent off to be translated.
+const drawn = document.createElement("p");
+drawn.innerHTML = `A caption <svg width="20" height="20"><text x="0" y="10">图</text></svg> after it.`;
+document.getElementById("stage").append(drawn);
+check("an svg reports a lowercase tag name", drawn.querySelector("svg").tagName === "svg");
+check("pointing inside an svg is refused",
+  resolveBlock(drawn.querySelector("text").firstChild) === null,
+  String(resolveBlock(drawn.querySelector("text").firstChild)?.tagName));
+check("and it is sent as an opaque placeholder, never entered",
+  serialize(drawn)?.text === "A caption <b0></b0> after it.", serialize(drawn)?.text);
+
+const formula = document.createElement("p");
+formula.innerHTML = `The identity <math><mrow><mi>a</mi><mo>+</mo><mn>1</mn></mrow></math> holds.`;
+document.getElementById("stage").append(formula);
+check("a formula is passed through whole rather than translated symbol by symbol",
+  serialize(formula)?.text === "The identity <b0></b0> holds.", serialize(formula)?.text);
+
 // A flex parent blockifies its children, so a row of links reports display:block on every one of
 // them. Taobao's hot-word row under the search box is this exactly, and reading those as separate
 // passages refused the whole row.

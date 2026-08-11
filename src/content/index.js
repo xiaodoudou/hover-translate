@@ -296,7 +296,12 @@ installHover({
   onTrigger: (target) => {
     handle(target).catch(() => {});
   },
+  // Resolved the same way the trigger resolves it, so the outline is the block that would actually
+  // be translated rather than a guess at it. Nothing resolved means nothing would happen, and
+  // showing no outline says exactly that.
+  onAim: (target) => render.aim(target ? resolveBlock(target) : null),
   onEscape: () => {
+    render.clearAim();
     hideBubble();
     const count = render.revertAll() + hideAllImageOverlays();
     if (count) toast(`Restored ${count} block${count === 1 ? "" : "s"}.`, { position: settings.toastPosition });

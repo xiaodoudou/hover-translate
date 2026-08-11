@@ -88,6 +88,17 @@
   opacity: 0.95 !important;
 }
 
+/* What the trigger would act on, while the key is held.
+   An outline rather than a border, because an outline is painted outside the box and takes no space
+   at all: the element keeps its size, nothing reflows, and no word moves under the pointer while the
+   user is aiming at it. box-sizing: border-box would only hold the outer size still; it pays for the
+   border by shrinking the content box, so the text inside would shift instead. The offset lifts the
+   line clear of the box's own edge so a bordered element still reads as outlined. */
+.ht-aim {
+  outline: 2px solid rgba(14, 165, 233, 0.85) !important;
+  outline-offset: 1px !important;
+}
+
 /* Markers for the replace modes. Every one is layout-neutral on purpose: an outline is painted
    outside the box and a text decoration inside the line box, so neither reflows anything. */
 .ht-mark-outline {
