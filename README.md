@@ -56,11 +56,19 @@ the failover moves on to Lens.
 | --- | --- |
 | Hover text, tap <kbd>Ctrl</kbd> | Translates the block under the pointer |
 | Hover an image, tap <kbd>Ctrl</kbd> | Reads the image and lays the translation over it |
-| Keep <kbd>Ctrl</kbd> held and move | Translates each block you sweep over |
+| Hold <kbd>Ctrl</kbd> | Outlines the block that would be translated, and translates nothing |
 | Tap <kbd>Ctrl</kbd> on a translated block or image | Restores it |
 | <kbd>Esc</kbd> | Restores every block and image on the page |
 
-A tap fires when you release the key, so a quick press is enough. Shortcuts are unaffected: pressing
+While the key is down, the block it would act on is outlined, so you can see what you are about to
+translate and let go if it is the wrong one. It is the same block the trigger itself resolves, not a
+guess at it, so no outline means nothing would happen there. It is an outline rather than a border
+because an outline is painted outside the box and takes no space at all: the element keeps its size,
+nothing reflows, and no word moves under the pointer while you are aiming at it. On a double-tap
+trigger only the second press outlines anything, since the first one does nothing.
+
+Nothing happens until you let go, so holding the key is how you aim and releasing it is how you
+commit; a press you think better of costs nothing. Shortcuts are unaffected: pressing
 any second key, clicking or scrolling while the trigger key is down cancels the press, so
 <kbd>Ctrl</kbd>+C, <kbd>Ctrl</kbd>+click and <kbd>Ctrl</kbd>+scroll all behave normally.
 
@@ -77,15 +85,21 @@ Each one is shown in the demo above, in order, before the image at the end.
 Bilingual mode appends the translated text and nothing else, in a single `<span>`, so the original
 is left exactly as it was.
 
-## Lines the page cut to one width
+## Lines the page cut short
 
-A page cuts its one-line boxes to fit the language it shipped with, so a longer translation ends up
-behind the ellipsis; a sidebar menu is the usual case. There are only two honest answers, and
-**Scroll clipped lines** in the popup picks between them.
+A page sizes its text boxes for the language it shipped with, and the same sentence is usually longer
+in another one, so part of the translation ends up where the page never meant to paint. It happens
+two ways. Sideways: one `nowrap` line with its tail behind an ellipsis, which is what a sidebar menu
+does. Downwards: the text wraps as it should and the box was simply given the height its own language
+needed, so the second line exists, is laid out, and is painted nowhere, which is what a product card
+does to a title. Neither cut is necessarily on the element holding the words, since a card sizes the
+row rather than the title inside it, so the boxes above the text are checked too.
 
-| Setting | What happens to a line that no longer fits |
+There are only two honest answers, and **Scroll clipped lines** in the popup picks between them.
+
+| Setting | What happens to text that no longer fits |
 | --- | --- |
-| **Enable** | The default. The line scrolls, unless the page left room around the box, which it takes instead |
+| **Enable** | The default. It scrolls, unless the page left room around the box, which it takes instead |
 | **Disable** | The box always grows |
 
 There was a third setting that always scrolled and never took the room. It is gone, because next to
@@ -98,9 +112,14 @@ and the page's own ellipsis comes back when the line is home.
 
 A lap carries the line from off the right edge of the box to off the left one, at one steady 50px/s,
 for as long as you are pointing at the row. Because both ends of a lap are off screen the wrap has
-no seam, and because it never stops there is nothing for a reader to wait out. It holds still for
-two seconds first, so the beginning can be read where you were already looking, and it keeps the
-page's own ellipsis until it actually sets off.
+no seam, and because it never stops there is nothing for a reader to wait out. It holds still for a
+second first, so the beginning can be read where you were already looking, and it keeps the page's
+own ellipsis until it actually sets off.
+
+A line cut downwards takes the same lap through the same box, rising through the window the page
+left and coming back from below. Only the pace differs: reading down a paragraph is waiting for the
+next line rather than following words across, so it is timed a line at a time, roughly one every two
+seconds, instead of in pixels.
 
 Sliding is a `transform` on a wrapper span, the one node this extension adds to a page, and only
 inside a box whose text it has already replaced. That is what makes it smooth: `text-indent` is a

@@ -427,6 +427,27 @@ const PROVIDERS = [
 ];
 const BY_ID = new Map(PROVIDERS.map((provider) => [provider.id, provider]));
 
+// Whether a reply still carries every numbered marker it was handed, each exactly once. The whole
+// structure-preserving scheme rests on that: richtext.js refuses an unbalanced reply and the block
+// degrades to flat text, losing its links and its emphasis. Google's backup endpoint drops a closing
+// marker on text it otherwise translates correctly, so this is worth knowing before the reply is
+// used rather than after.
+export function keepsMarkers(sent, got) {
+  const wanted = sent.join("\n").match(/<\/?b\d+>/g) || [];
+  if (!wanted.length) return true;
+  const tally = new Map();
+  for (const marker of got.join("\n").match(/<\/?b\d+>/g) || []) {
+    tally.set(marker, (tally.get(marker) || 0) + 1);
+  }
+  for (const marker of wanted) {
+    const left = tally.get(marker) || 0;
+    if (!left) return false;
+    tally.set(marker, left - 1);
+  }
+  // Anything left over is a marker the provider invented, which parse() would refuse just as fast.
+  return [...tally.values()].every((left) => left === 0);
+}
+
 // `preferred` is the user's order of preference. A string still works, so a single provider can be
 // forced, and anything unrecognised falls back to the full list rather than failing outright.
 export async function translate(texts, targetLang, preferred, sourceLang = "auto") {
@@ -437,6 +458,10 @@ export async function translate(texts, targetLang, preferred, sourceLang = "auto
   if (!order.length) order.push(...PROVIDERS);
 
   const failures = [];
+  // A reply that lost its markers has not failed: the words are right and the block can still be
+  // rewritten as flat text. It is kept in case nothing better answers, and the chain carries on
+  // looking for one that would let the block keep its markup as well.
+  let flattened = null;
   for (const provider of order) {
     // Timed from just before the request so the figure the popup shows is the provider's own
     // round trip, not the queueing this extension added.
@@ -444,11 +469,15 @@ export async function translate(texts, targetLang, preferred, sourceLang = "auto
       await throttle();
       const startedAt = Date.now();
       const result = await provider.run(texts, sourceLang, targetLang);
-      return { ...result, provider: provider.id, ms: Date.now() - startedAt };
+      const answer = { ...result, provider: provider.id, ms: Date.now() - startedAt };
+      if (keepsMarkers(texts, result.texts)) return answer;
+      flattened ??= answer;
+      failures.push(`${provider.id}: lost the markers it was given`);
     } catch (error) {
       failures.push(`${provider.id}: ${error?.message || error}`);
     }
   }
+  if (flattened) return flattened;
   throw new Error(failures.join("; ") || "no provider available");
 }
 

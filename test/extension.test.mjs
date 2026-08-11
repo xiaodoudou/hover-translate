@@ -606,6 +606,61 @@ try {
   await sleep(1500);
   check("no translation fired", (await ev(`document.querySelectorAll('[data-ht-state]').length`)) === 0);
 
+  // Holding the key should say what it is about to act on, and say it without moving anything: an
+  // outline is painted outside the box and takes no space, where a border would have to come out of
+  // the element's own size or push its neighbours down.
+  console.log("\nholding the key shows what it would translate");
+  const aimShape = () => ev(`(() => { const el = ${SEL.fr}; const r = el.getBoundingClientRect();
+    const next = el.nextElementSibling;
+    return { cls: el.className, w: Math.round(r.width), h: Math.round(r.height),
+             nextTop: next ? Math.round(next.getBoundingClientRect().top + scrollY) : null,
+             docH: Math.round(document.documentElement.scrollHeight),
+             outline: getComputedStyle(el).outlineWidth,
+             aimed: document.querySelectorAll('.ht-aim').length }; })()`);
+  const aimSpot = await ev(`(() => { const el = ${SEL.fr}; el.scrollIntoView({block:'center'});
+    const r = el.getBoundingClientRect();
+    return {x: Math.round(r.left + Math.min(40, r.width / 2)), y: Math.round(r.top + r.height / 2)}; })()`);
+  const beforeAim = await aimShape();
+  await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: aimSpot.x, y: aimSpot.y, button: "none" });
+  await sleep(120);
+  const aimKey = { key: "Control", code: "ControlLeft", windowsVirtualKeyCode: 17, nativeVirtualKeyCode: 17 };
+  await page.send("Input.dispatchKeyEvent", { type: "rawKeyDown", ...aimKey });
+  await sleep(250);
+  const aimed = await aimShape();
+  console.log("   ", JSON.stringify({ before: beforeAim, aimed }));
+  check("the block under the pointer is outlined while the key is held",
+    aimed.cls.includes("ht-aim") && aimed.aimed === 1, `${aimed.cls} / ${aimed.aimed}`);
+  check("drawn as an outline, which is painted outside the box", aimed.outline === "2px", aimed.outline);
+  check("the block is exactly the size it was", aimed.w === beforeAim.w && aimed.h === beforeAim.h,
+    JSON.stringify({ w: [beforeAim.w, aimed.w], h: [beforeAim.h, aimed.h] }));
+  check("and nothing around it moved",
+    aimed.nextTop === beforeAim.nextTop && aimed.docH === beforeAim.docH,
+    JSON.stringify({ nextTop: [beforeAim.nextTop, aimed.nextTop], docH: [beforeAim.docH, aimed.docH] }));
+
+  // Holding is aiming and nothing else. Anything that fired while the key was down would fire on a
+  // block the user is still choosing, and would do it behind the outline pointing at it.
+  await sleep(1400);
+  check("and holding it translates nothing, however long it is held",
+    (await ev(`document.querySelectorAll('[data-ht-state]').length`)) === 0);
+  check("the outline is still the only thing on the block",
+    (await ev(`document.querySelectorAll('.ht-aim').length`)) === 1);
+
+  // The press that turns out to be a shortcut takes the outline with it, so nothing is left marked.
+  for (const type of ["rawKeyDown", "keyUp"]) {
+    await page.send("Input.dispatchKeyEvent", {
+      type, key: "c", code: "KeyC", windowsVirtualKeyCode: 67, nativeVirtualKeyCode: 67, modifiers: 2,
+    });
+  }
+  await sleep(200);
+  check("a shortcut being typed takes the outline away again",
+    (await ev(`document.querySelectorAll('.ht-aim').length`)) === 0);
+  await page.send("Input.dispatchKeyEvent", { type: "keyUp", ...aimKey });
+  await sleep(800);
+  check("and the cancelled press translated nothing",
+    (await ev(`document.querySelectorAll('[data-ht-state]').length`)) === 0);
+  check("leaving no class of ours on the block",
+    (await ev(`${SEL.fr}.className.includes('ht-')`)) === false, await ev(`${SEL.fr}.className`));
+
   // --- every provider, driven through the real extension ----------------
   console.log("\neach provider serves a real page");
   const TAGGED = "<b0>这是一段</b0>简体中文的<b1>测试文字</b1>。";

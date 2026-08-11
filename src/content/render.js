@@ -1,4 +1,11 @@
-import { ATTR_STATE, CLASS_TRANSLATED, CLASS_BILINGUAL, CLASS_PENDING, CLASS_ERROR } from "../lib/rules.js";
+import {
+  ATTR_STATE,
+  CLASS_AIM,
+  CLASS_TRANSLATED,
+  CLASS_BILINGUAL,
+  CLASS_PENDING,
+  CLASS_ERROR,
+} from "../lib/rules.js";
 import { markOverflow, clearOverflow } from "./marquee.js";
 
 // How to put each block back, as a closure: the two apply paths undo differently.
@@ -44,6 +51,26 @@ export function markError(block) {
     block.classList.remove(CLASS_ERROR);
     if (block.getAttribute("class") === "") block.removeAttribute("class");
   }, 1600);
+}
+
+// What the trigger would act on, while the key is held. Exactly the block that would be translated,
+// so where nothing is outlined nothing would happen: the absence is as much of an answer as the
+// outline. One element at a time, and the class is the whole of it.
+let aiming = null;
+
+export function aim(block) {
+  if (aiming === block) return;
+  clearAim();
+  if (!block) return;
+  aiming = block;
+  block.classList.add(CLASS_AIM);
+}
+
+export function clearAim() {
+  if (!aiming) return;
+  aiming.classList.remove(CLASS_AIM);
+  if (aiming.getAttribute("class") === "") aiming.removeAttribute("class");
+  aiming = null;
 }
 
 // Purely visual markers for the modes that replace the text. Each is chosen because it costs no
@@ -128,6 +155,7 @@ export function refreshOverflow() {
 export function revert(block) {
   const undo = undos.get(block);
   if (!undo) return false;
+  if (aiming === block) clearAim();
   clearOverflow(block);
   undo();
   undos.delete(block);
