@@ -107,9 +107,6 @@ nothing told the two apart: a menu row is built around its single line and has n
 scrolls either way. They only parted company where a page left slack, and taking slack costs the
 page nothing. Anything still stored under the old name reads as the default.
 
-Sliding is a `text-indent` inside the box the page already drew: no width changes, no node is added,
-and the page's own ellipsis comes back when the line is home.
-
 A lap carries the line from off the right edge of the box to off the left one, at one steady 50px/s,
 for as long as you are pointing at the row. Because both ends of a lap are off screen the wrap has
 no seam, and because it never stops there is nothing for a reader to wait out. It holds still for a
