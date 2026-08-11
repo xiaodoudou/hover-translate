@@ -116,10 +116,13 @@ no seam, and because it never stops there is nothing for a reader to wait out. I
 second first, so the beginning can be read where you were already looking, and it keeps the page's
 own ellipsis until it actually sets off.
 
-A line cut downwards takes the same lap through the same box, rising through the window the page
-left and coming back from below. Only the pace differs: reading down a paragraph is waiting for the
-next line rather than following words across, so it is timed a line at a time, roughly one every two
-seconds, instead of in pixels.
+Text cut downwards moves the same way, once the shape of the window says how. A window one line tall
+is a line, whichever way the page cut it, so the wrap comes out and it reads across exactly like the
+one above: the box was showing a single line before and it shows a single line now, so nothing about
+its height changes. A window several lines tall is a paragraph cut short instead, and undoing the
+wrap there would leave one line rattling around in a box built for three, so it rises through the
+window and comes back from below. That one is timed a line at a time, roughly one every two seconds,
+because reading down a paragraph is waiting for the next line rather than following words across.
 
 Sliding is a `transform` on a wrapper span, the one node this extension adds to a page, and only
 inside a box whose text it has already replaced. That is what makes it smooth: `text-indent` is a

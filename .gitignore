@@ -1,3 +1,4 @@
 dist/
 store/
 .serena/
+.examples/

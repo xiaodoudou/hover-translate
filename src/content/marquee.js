@@ -1,6 +1,7 @@
 import {
   CLASS_MARQUEE,
   CLASS_MARQUEE_COLUMN,
+  CLASS_MARQUEE_FLAT,
   CLASS_MARQUEE_LINE,
   CLASS_MARQUEE_MOVING,
   CLASS_UNCLIPPED,
@@ -177,7 +178,15 @@ function handleTall(el, block) {
   if (el.clientHeight > line * MAX_CLIPPED_LINES) return false;
 
   if (growTall(el)) return true;
-  slide(el, block, "y");
+  // A window one line tall is a line the page cut, whichever way it did the cutting, so it reads
+  // across like every other one: the wrap is undone and the sentence moves sideways through the box
+  // it always had. A taller window is a paragraph cut short, where the reading order is down the
+  // lines and undoing the wrap would leave the rest of the box empty. A box that hides what runs
+  // past its bottom but not what runs past its side is left to rise as well, since one long line
+  // there is a line it would have to grow a scrollbar for.
+  const content = lineHeight(el.contains(block) ? block : el);
+  const across = CLIPPED.has(style.overflowX) && el.clientHeight <= content * 1.5;
+  slide(el, block, across ? "flat" : "y");
   return true;
 }
 
@@ -260,25 +269,37 @@ function roomFor(el, block, bottom) {
 // driven from here rather than by a :hover rule: a CSS animation starts over every time its selector
 // matches again, so a pointer crossing the edge of the box would jump the line back to the start.
 //
-// Downwards it is the same lap around the same box: the wrapped paragraph rises through the window
-// the page left, goes off the top and comes back from below. Only the pace differs, because there
-// the reader is waiting for lines rather than following words.
+// Text the page cut downwards moves the same way, once the shape of the window says how. One line
+// tall and it is a line like any other: the wrap comes out and it reads across. Taller than that and
+// it is a paragraph, so it rises through the window instead, goes off the top and comes back from
+// below, paced by the line rather than in pixels, because the reader is waiting for lines to arrive
+// rather than following words across.
 function slide(el, block, axis) {
   const down = axis === "y";
+  // The page wrapped this text and hid the rest; putting it back on one line is what makes it a
+  // line to move, and the box was showing exactly one line already.
+  const flat = axis === "flat";
+
+  // Read before anything moves: wrapping the children changes what the box reports about them.
   const view = down ? el.clientHeight : el.clientWidth;
-  const line = down ? el.scrollHeight : el.scrollWidth;
-  const lap = view + line;
-  const pace = down ? (lap / lineHeight(el)) * SECONDS_PER_LINE : lap / PX_PER_SECOND;
-  const seconds = Math.min(MAX_SECONDS, Math.max(MIN_SECONDS, pace));
-  const at = (px) => (down ? `translateY(${px}px)` : `translateX(${px}px)`);
+  const laid = down ? el.scrollHeight : el.scrollWidth;
 
   el.classList.add(CLASS_MARQUEE);
   if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
 
   const runner = document.createElement("span");
-  runner.className = down ? `${CLASS_MARQUEE_LINE} ${CLASS_MARQUEE_COLUMN}` : CLASS_MARQUEE_LINE;
+  const extra = down ? ` ${CLASS_MARQUEE_COLUMN}` : flat ? ` ${CLASS_MARQUEE_FLAT}` : "";
+  runner.className = CLASS_MARQUEE_LINE + extra;
   runner.append(...el.childNodes);
   el.append(runner);
+
+  // The flattened one has to be measured after the fact: until the wrap came out there was no
+  // single line to measure, only as many as the page had chosen to break it into.
+  const line = flat ? runner.scrollWidth : laid;
+  const lap = view + line;
+  const pace = down ? (lap / lineHeight(el)) * SECONDS_PER_LINE : lap / PX_PER_SECOND;
+  const seconds = Math.min(MAX_SECONDS, Math.max(MIN_SECONDS, pace));
+  const at = (px) => (down ? `translateY(${px}px)` : `translateX(${px}px)`);
 
   // Zero is where the page drew the line, so nothing here has to know about its own indent.
   const animation = runner.animate(
