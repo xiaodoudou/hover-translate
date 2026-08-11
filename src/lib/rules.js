@@ -71,6 +71,9 @@ export const CLASS_MARQUEE_LINE = "ht-marquee-line";
 // The same wrapper when the cut was on the number of lines rather than on the width: it holds a
 // wrapped paragraph rather than one line, so it stacks instead of shrinking to the text.
 export const CLASS_MARQUEE_COLUMN = "ht-marquee-column";
+// And when that cut left a window one line tall: the wrap is undone so the sentence is one line
+// again, which is the thing that can then be read across.
+export const CLASS_MARQUEE_FLAT = "ht-marquee-flat";
 // Only while the line is actually moving: the ellipsis marks a cut that is not there mid-slide.
 export const CLASS_MARQUEE_MOVING = "ht-marquee-moving";
 export const CLASS_UNCLIPPED = "ht-unclipped";

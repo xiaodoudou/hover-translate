@@ -16,6 +16,9 @@
      what wraps past it, and the title inside it is inline, so it cannot be measured for the cut. */
   .row { width: 120px; height: 20px; overflow: hidden; line-height: 20px; }
   .row > .title { display: inline; }
+  /* And a window several lines tall, which is a paragraph cut short rather than a line. */
+  .clamp { width: 120px; line-height: 20px; display: -webkit-box; -webkit-box-orient: vertical;
+           -webkit-line-clamp: 3; overflow: hidden; }
 </style>
 </head>
 <body>
@@ -640,18 +643,23 @@ check("and the row above it is hiding a whole line",
 
 setClippedLines("fit");
 markOverflow(title);
-const column = cardRow.querySelector(".ht-marquee-line");
-const rise = column?.getAnimations().find((a) => a.id === "ht-marquee");
-const risen = rise?.effect.getKeyframes().map((f) => f.transform);
+const flatLine = cardRow.querySelector(".ht-marquee-line");
+const across = flatLine?.getAnimations().find((a) => a.id === "ht-marquee");
+const flatFrames = across?.effect.getKeyframes().map((f) => f.transform);
 check("the row above the block is what gets marked",
   cardRow.classList.contains("ht-marquee") && !title.classList.contains("ht-marquee"));
-check("the wrapped paragraph rises through the window rather than sliding sideways",
-  risen?.length === 2 && risen.every((t) => t.startsWith("translateY")), JSON.stringify(risen));
-check("a lap starts with it below the window and ends with it above",
-  risen && parseFloat(risen[0].match(/-?[\d.]+/)[0]) === cardRow.clientHeight &&
-    parseFloat(risen[1].match(/-?[\d.]+/)[0]) === -cardRow.scrollHeight, JSON.stringify(risen));
-check("it stacks the lines rather than shrinking to one",
-  getComputedStyle(column).display === "block", getComputedStyle(column).display);
+// A window one line tall is a line, whichever way the page cut it, so it reads across like every
+// other one rather than rising through a box that only ever shows one line at a time.
+check("the wrap comes out, so the sentence is a single line again",
+  getComputedStyle(flatLine).whiteSpace === "nowrap", getComputedStyle(flatLine).whiteSpace);
+check("and it moves sideways, not downwards",
+  flatFrames?.length === 2 && flatFrames.every((t) => t.startsWith("translateX")), JSON.stringify(flatFrames));
+check("a lap starts off the right edge of the box and ends past the left one",
+  flatFrames && parseFloat(flatFrames[0].match(/-?[\d.]+/)[0]) === cardRow.clientWidth &&
+    parseFloat(flatFrames[1].match(/-?[\d.]+/)[0]) === -flatLine.scrollWidth, JSON.stringify(flatFrames));
+check("nothing is left hidden below the box, since there is only the one line now",
+  cardRow.scrollHeight - cardRow.clientHeight < 1,
+  `${cardRow.scrollHeight} vs ${cardRow.clientHeight}`);
 check("and the card is exactly as tall as it was",
   card.getBoundingClientRect().height === cardHeight,
   `${card.getBoundingClientRect().height} vs ${cardHeight}`);
@@ -674,6 +682,31 @@ check("and the card is back to one line when the translation goes",
   card.getBoundingClientRect().height === cardHeight,
   `${card.getBoundingClientRect().height} vs ${cardHeight}`);
 setClippedLines("fit");
+
+// The other shape of the same cut: a window several lines tall, which is a paragraph the page cut
+// short rather than a line. Undoing the wrap there would leave one line in a box built for three.
+const clampBox = document.createElement("div");
+clampBox.innerHTML = `<div class="clamp">A translated paragraph that runs on well past the three
+  lines this box was built to show, and is cut off where they end</div>`;
+document.getElementById("stage").append(clampBox);
+const clamped = clampBox.firstElementChild;
+const clampHeight = clamped.getBoundingClientRect().height;
+markOverflow(clamped);
+const column = clamped.querySelector(".ht-marquee-line");
+const rise = column?.getAnimations().find((a) => a.id === "ht-marquee");
+const risen = rise?.effect.getKeyframes().map((f) => f.transform);
+check("a clamped paragraph rises through its window instead",
+  risen?.length === 2 && risen.every((t) => t.startsWith("translateY")), JSON.stringify(risen));
+check("a lap starts with it below the window and ends with it above",
+  risen && parseFloat(risen[0].match(/-?[\d.]+/)[0]) === clamped.clientHeight &&
+    parseFloat(risen[1].match(/-?[\d.]+/)[0]) === -clamped.scrollHeight, JSON.stringify(risen));
+check("it keeps the lines stacked rather than shrinking them to one",
+  getComputedStyle(column).display === "block" && getComputedStyle(column).whiteSpace !== "nowrap",
+  `${getComputedStyle(column).display} / ${getComputedStyle(column).whiteSpace}`);
+check("and the box is the height the page gave it",
+  clamped.getBoundingClientRect().height === clampHeight,
+  `${clamped.getBoundingClientRect().height} vs ${clampHeight}`);
+clearOverflow(clamped);
 
 // --- the trigger: one tap, or two -----------------------------------------
 const trigger = { triggerKey: "Control", triggerTaps: 1, doubleTapMs: 400 };

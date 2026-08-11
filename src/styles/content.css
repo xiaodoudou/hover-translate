@@ -161,6 +161,14 @@
   vertical-align: initial !important;
 }
 
+/* And when the page cut downwards but left a window only one line tall. The wrap is undone so the
+   sentence is a single line again, and then it reads across like any other line the page cut. The
+   box keeps the one line it always showed, so nothing about its height changes. */
+.ht-marquee-flat {
+  white-space: nowrap !important;
+  word-break: normal !important;
+}
+
 /* The other answer: keep the line and let the box grow. It grows downwards only, wrapping inside the
    width the page gave it, because that is the growth a page can usually absorb. Widening the box is
    what would push the rest of the layout out of place. */

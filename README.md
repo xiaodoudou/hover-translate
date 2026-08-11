@@ -107,19 +107,19 @@ nothing told the two apart: a menu row is built around its single line and has n
 scrolls either way. They only parted company where a page left slack, and taking slack costs the
 page nothing. Anything still stored under the old name reads as the default.
 
-Sliding is a `text-indent` inside the box the page already drew: no width changes, no node is added,
-and the page's own ellipsis comes back when the line is home.
-
 A lap carries the line from off the right edge of the box to off the left one, at one steady 50px/s,
 for as long as you are pointing at the row. Because both ends of a lap are off screen the wrap has
 no seam, and because it never stops there is nothing for a reader to wait out. It holds still for a
 second first, so the beginning can be read where you were already looking, and it keeps the page's
 own ellipsis until it actually sets off.
 
-A line cut downwards takes the same lap through the same box, rising through the window the page
-left and coming back from below. Only the pace differs: reading down a paragraph is waiting for the
-next line rather than following words across, so it is timed a line at a time, roughly one every two
-seconds, instead of in pixels.
+Text cut downwards moves the same way, once the shape of the window says how. A window one line tall
+is a line, whichever way the page cut it, so the wrap comes out and it reads across exactly like the
+one above: the box was showing a single line before and it shows a single line now, so nothing about
+its height changes. A window several lines tall is a paragraph cut short instead, and undoing the
+wrap there would leave one line rattling around in a box built for three, so it rises through the
+window and comes back from below. That one is timed a line at a time, roughly one every two seconds,
+because reading down a paragraph is waiting for the next line rather than following words across.
 
 Sliding is a `transform` on a wrapper span, the one node this extension adds to a page, and only
 inside a box whose text it has already replaced. That is what makes it smooth: `text-indent` is a
