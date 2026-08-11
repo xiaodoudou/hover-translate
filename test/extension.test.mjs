@@ -610,8 +610,6 @@ try {
   // outline is painted outside the box and takes no space, where a border would have to come out of
   // the element's own size or push its neighbours down.
   console.log("\nholding the key shows what it would translate");
-  await ev(`chrome.storage.sync.set({holdDelay: 99000})`);
-  await sleep(400);
   const aimShape = () => ev(`(() => { const el = ${SEL.fr}; const r = el.getBoundingClientRect();
     const next = el.nextElementSibling;
     return { cls: el.className, w: Math.round(r.width), h: Math.round(r.height),
@@ -639,6 +637,14 @@ try {
     aimed.nextTop === beforeAim.nextTop && aimed.docH === beforeAim.docH,
     JSON.stringify({ nextTop: [beforeAim.nextTop, aimed.nextTop], docH: [beforeAim.docH, aimed.docH] }));
 
+  // Holding is aiming and nothing else. Anything that fired while the key was down would fire on a
+  // block the user is still choosing, and would do it behind the outline pointing at it.
+  await sleep(1400);
+  check("and holding it translates nothing, however long it is held",
+    (await ev(`document.querySelectorAll('[data-ht-state]').length`)) === 0);
+  check("the outline is still the only thing on the block",
+    (await ev(`document.querySelectorAll('.ht-aim').length`)) === 1);
+
   // The press that turns out to be a shortcut takes the outline with it, so nothing is left marked.
   for (const type of ["rawKeyDown", "keyUp"]) {
     await page.send("Input.dispatchKeyEvent", {
@@ -654,8 +660,6 @@ try {
     (await ev(`document.querySelectorAll('[data-ht-state]').length`)) === 0);
   check("leaving no class of ours on the block",
     (await ev(`${SEL.fr}.className.includes('ht-')`)) === false, await ev(`${SEL.fr}.className`));
-  await ev(`chrome.storage.sync.set({holdDelay: 200})`);
-  await sleep(400);
 
   // --- every provider, driven through the real extension ----------------
   console.log("\neach provider serves a real page");

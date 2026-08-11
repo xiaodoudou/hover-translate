@@ -1,15 +1,23 @@
 import {
   CLASS_MARQUEE,
+  CLASS_MARQUEE_COLUMN,
   CLASS_MARQUEE_LINE,
   CLASS_MARQUEE_MOVING,
   CLASS_UNCLIPPED,
 } from "../lib/rules.js";
 
-// A page cuts its one-line boxes to fit the language it shipped with: the width, the nowrap and the
-// ellipsis are all measured against that string. The same sentence in another language is usually
-// wider, so the tail lands outside the box and the ellipsis hides it. There are only two honest ways
-// to show it: keep the box and move the line inside it, or keep the line and let the box grow. The
-// setting picks, and "fit" asks the page which one it has room for.
+// A page sizes its text boxes for the language it shipped with, and the same sentence is longer in
+// most others, so part of a translation ends up where the page never meant to paint. It cuts two
+// ways. Sideways: nowrap, hidden, and an ellipsis where the words ran out of width, which is what a
+// sidebar menu does. Downwards: the text wraps as it should and the box is given the height its own
+// language needed, so the second line exists, is laid out, and is painted nowhere, which is what a
+// card does to a title. Neither cut is necessarily on the box holding the words, since a card sizes
+// the row rather than the title inside it, and an inline title cannot be measured for a cut at all:
+// clientWidth and clientHeight are both zero on an inline box.
+//
+// There are only two honest answers to either cut: keep the box and move the text inside it, or keep
+// the text and let the box grow. The setting picks, and "fit" asks the page which one it has room
+// for.
 
 // text-indent moves the first line of a block container. Inside a flex or grid box it would indent
 // each item's own text instead of sliding the row, so those keep their ellipsis.
@@ -23,9 +31,17 @@ const ONE_LINE = new Set(["nowrap", "pre"]);
 // Below this the ellipsis is covering a character or two and the movement costs more attention than
 // it saves.
 const MIN_HIDDEN = 12;
+// How far above a block its cut can be. Deep enough for the fixed-height row a card wraps its title
+// in, shallow enough never to reach the page's own scrolling container.
+const MAX_CLIP_CLIMB = 4;
+// How many lines tall a box can be and still be read as a capped line of text rather than a region.
+const MAX_CLIPPED_LINES = 6;
 // Reading pace, and the same pace the whole way. Easing a marquee spends the start of it moving a
 // fraction of a pixel per frame, which does not read as slow, it reads as the text shivering.
 const PX_PER_SECOND = 50;
+// Downwards the reader is not tracking anything: they wait for the next line and read it where it
+// lands. So that pace is one line at a time rather than so many pixels a second.
+const SECONDS_PER_LINE = 1.8;
 const MIN_SECONDS = 1;
 const MAX_SECONDS = 30;
 // A row is 24px tall, so a pointer resting near its edge crosses in and out of it. Without this the
@@ -39,6 +55,9 @@ const START_DELAY = 1000;
 const MARKED = `.${CLASS_MARQUEE}, .${CLASS_UNCLIPPED}`;
 // The animation and the two listeners that drive it, per moving box.
 const sliding = new WeakMap();
+// What was touched on behalf of each block. A box above the block cannot be found again by looking
+// inside it, so putting the page back has to be done from a record rather than from a selector.
+const marked = new WeakMap();
 
 // fit | grow, as described in settings.js.
 let mode = "fit";
@@ -72,33 +91,99 @@ function strip(el) {
   el.classList.remove(CLASS_MARQUEE, CLASS_MARQUEE_MOVING, CLASS_UNCLIPPED);
 }
 
-// Handles every box in the block whose translated line no longer fits.
+// Handles every box whose translated text no longer fits, inside the block or above it.
 export function markOverflow(block) {
-  // Widths are read for every box first: the first read pays for the layout the new text
-  // invalidated and the rest are answered from it, so getComputedStyle is only asked about the few
-  // boxes that actually overflow.
+  // Sizes are read for every box first: the first read pays for the layout the new text invalidated
+  // and the rest are answered from it, so getComputedStyle is only asked about the few boxes that
+  // actually overflow.
   const boxes = [block, ...block.querySelectorAll("*")];
-  const overflowing = boxes.filter((el) => el.scrollWidth - el.clientWidth >= MIN_HIDDEN);
+  const touched = [];
+  const record = (el, handled) => handled && touched.push(el);
 
-  for (const el of overflowing) {
-    // A clipped line inside another one: only the outer box is handled, and it carries the inner
-    // one with it.
-    if (el.parentElement?.closest(MARKED)) continue;
+  for (const el of boxes) {
+    if (el.scrollWidth - el.clientWidth >= MIN_HIDDEN) record(el, handleWide(el, block));
+    else if (el.scrollHeight - el.clientHeight >= MIN_HIDDEN) record(el, handleTall(el, block));
+  }
 
+  const outer = clipper(block);
+  if (outer) record(outer, handleWide(outer, block) || handleTall(outer, block));
+
+  marked.set(block, touched);
+}
+
+// The nearest box above the block that cuts its text off. Only the nearest: if that one holds the
+// block whole then nothing further out can be cutting this text, whatever else it clips.
+function clipper(block) {
+  const box = block.getBoundingClientRect();
+  let el = block.parentElement;
+  for (let climbed = 0; el && climbed < MAX_CLIP_CLIMB; climbed++, el = el.parentElement) {
+    if (el === document.body || el === document.documentElement) return null;
     let style;
     try {
       style = getComputedStyle(el);
     } catch {
-      continue;
+      return null;
     }
-    if (!CLIPPED.has(style.overflowX)) continue;
-    if (!ONE_LINE.has(style.whiteSpace)) continue;
-    if (!SLIDABLE.has(style.display)) continue;
-
-    // Preformatted text is left to slide: wrapping it would collapse the spacing it was written for.
-    if (style.whiteSpace === "nowrap" && grow(el, block)) continue;
-    slide(el, style, block);
+    if (!CLIPPED.has(style.overflowX) && !CLIPPED.has(style.overflowY)) continue;
+    const inside = el.getBoundingClientRect();
+    return box.bottom > inside.bottom + 1 || box.right > inside.right + 1 ? el : null;
   }
+  return null;
+}
+
+// Cut sideways: one long line with its tail behind the ellipsis.
+function handleWide(el, block) {
+  // A clipped line inside another one: only the outer box is handled, and it carries the inner one
+  // with it.
+  if (el.matches(MARKED) || el.parentElement?.closest(MARKED)) return false;
+  if (el.scrollWidth - el.clientWidth < MIN_HIDDEN) return false;
+
+  let style;
+  try {
+    style = getComputedStyle(el);
+  } catch {
+    return false;
+  }
+  if (!CLIPPED.has(style.overflowX)) return false;
+  if (!ONE_LINE.has(style.whiteSpace)) return false;
+  if (!SLIDABLE.has(style.display)) return false;
+
+  // Preformatted text is left to slide: wrapping it would collapse the spacing it was written for.
+  if (style.whiteSpace === "nowrap" && grow(el, block)) return true;
+  slide(el, block, "x");
+  return true;
+}
+
+// Cut downwards: the text wraps as it should and the box stops after the number of lines the page's
+// own language needed. Nothing is missing from the layout, only from the paint.
+function handleTall(el, block) {
+  if (el.matches(MARKED) || el.parentElement?.closest(MARKED)) return false;
+  if (el.scrollHeight - el.clientHeight < MIN_HIDDEN) return false;
+
+  let style;
+  try {
+    style = getComputedStyle(el);
+  } catch {
+    return false;
+  }
+  if (!CLIPPED.has(style.overflowY)) return false;
+  // A box a few pixels shorter than its content is rounding, or a descender under the edge. A line
+  // of a sentence is what this is for.
+  const line = lineHeight(el, style);
+  if (el.scrollHeight - el.clientHeight < line * 0.6) return false;
+  // And a box measured in lines is a title the page capped. A tall one is a region of the page that
+  // happens to hide its overflow, and moving a whole region past a window, or growing one, would be
+  // a far stranger thing to do than leaving it as the page has it.
+  if (el.clientHeight > line * MAX_CLIPPED_LINES) return false;
+
+  if (growTall(el)) return true;
+  slide(el, block, "y");
+  return true;
+}
+
+function lineHeight(el, style = getComputedStyle(el)) {
+  // "normal" is the usual answer and parses to nothing, so the font size stands in for it.
+  return parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.2 || 16;
 }
 
 // Lets the line wrap inside the width the page gave the box, so the column keeps its place and only
@@ -108,6 +193,20 @@ function grow(el, block) {
   const bottom = block.getBoundingClientRect().bottom;
   el.classList.add(CLASS_UNCLIPPED);
   if (mode === "grow" || roomFor(el, block, bottom)) return true;
+  el.classList.remove(CLASS_UNCLIPPED);
+  return false;
+}
+
+// The same answer to the other cut: the limit on lines comes off and the box takes the height its
+// own text needs. Room here is the box's parent absorbing that without growing itself, which is
+// what a padded card does and what a row in a list of rows never does.
+function growTall(el) {
+  const parent = el.parentElement;
+  const before = parent?.getBoundingClientRect().bottom ?? 0;
+  el.classList.add(CLASS_UNCLIPPED);
+  if (mode === "grow") return true;
+  const shown = el.scrollHeight - el.clientHeight < 1;
+  if (shown && parent && parent.getBoundingClientRect().bottom <= before + 1) return true;
   el.classList.remove(CLASS_UNCLIPPED);
   return false;
 }
@@ -160,25 +259,32 @@ function roomFor(el, block, bottom) {
 // that is asking for the movement to stop every time their hand drifts. That is also why this is
 // driven from here rather than by a :hover rule: a CSS animation starts over every time its selector
 // matches again, so a pointer crossing the edge of the box would jump the line back to the start.
-function slide(el, style, block) {
-  const view = el.clientWidth;
-  const line = el.scrollWidth;
+//
+// Downwards it is the same lap around the same box: the wrapped paragraph rises through the window
+// the page left, goes off the top and comes back from below. Only the pace differs, because there
+// the reader is waiting for lines rather than following words.
+function slide(el, block, axis) {
+  const down = axis === "y";
+  const view = down ? el.clientHeight : el.clientWidth;
+  const line = down ? el.scrollHeight : el.scrollWidth;
   const lap = view + line;
-  const seconds = Math.min(MAX_SECONDS, Math.max(MIN_SECONDS, lap / PX_PER_SECOND));
+  const pace = down ? (lap / lineHeight(el)) * SECONDS_PER_LINE : lap / PX_PER_SECOND;
+  const seconds = Math.min(MAX_SECONDS, Math.max(MIN_SECONDS, pace));
+  const at = (px) => (down ? `translateY(${px}px)` : `translateX(${px}px)`);
 
   el.classList.add(CLASS_MARQUEE);
   if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
 
   const runner = document.createElement("span");
-  runner.className = CLASS_MARQUEE_LINE;
+  runner.className = down ? `${CLASS_MARQUEE_LINE} ${CLASS_MARQUEE_COLUMN}` : CLASS_MARQUEE_LINE;
   runner.append(...el.childNodes);
   el.append(runner);
 
   // Zero is where the page drew the line, so nothing here has to know about its own indent.
   const animation = runner.animate(
     [
-      { offset: 0, transform: `translateX(${view}px)`, easing: "linear" },
-      { offset: 1, transform: `translateX(${-line}px)` },
+      { offset: 0, transform: at(view), easing: "linear" },
+      { offset: 1, transform: at(-line) },
     ],
     { duration: seconds * 1000, iterations: Infinity },
   );
@@ -215,11 +321,14 @@ function slide(el, style, block) {
       el.classList.remove(CLASS_MARQUEE_MOVING);
     }, LEAVE_GRACE);
   };
-  block.addEventListener("pointerenter", start);
-  block.addEventListener("pointerleave", stop);
+  // Whichever of the two holds the other, so the pointer is never asked to stay somewhere smaller
+  // than the thing the reader is looking at.
+  const host = el.contains(block) ? el : block;
+  host.addEventListener("pointerenter", start);
+  host.addEventListener("pointerleave", stop);
   sliding.set(el, {
     animation,
-    host: block,
+    host,
     start,
     stop,
     timer: () => {
@@ -228,14 +337,17 @@ function slide(el, style, block) {
     },
   });
 
-  // The pointer is on the block already: it is what asked for this translation.
-  if (block.matches(":hover")) start();
+  // The pointer is on it already: it is what asked for this translation.
+  if (host.matches(":hover")) start();
 }
 
 // Must run before the block is put back: the rebuild path restores the original children, and the
 // marked boxes are among the ones it replaces.
 export function clearOverflow(block) {
+  const boxes = new Set(marked.get(block));
+  marked.delete(block);
   for (const el of [block, ...block.querySelectorAll(MARKED)]) {
-    if (el.matches(MARKED)) strip(el);
+    if (el.matches(MARKED)) boxes.add(el);
   }
+  for (const el of boxes) strip(el);
 }

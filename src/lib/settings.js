@@ -25,8 +25,6 @@ export const DEFAULTS = {
   // Which recogniser reads an image, in failover order. Youdao translates as it reads and hands
   // back a finished picture; the other two return lines, which providerOrder above then translates.
   imageOcrOrder: ["youdao", "lens", "yandex"],
-  // Not exposed: how long the key must be held before sweep mode starts.
-  holdDelay: 200,
   // The request is never slowed; the loading gradient is simply held this long so it is visible.
   // On-device translations come back in about 35ms, which would otherwise be a single frame flash.
   minLoadingMs: 400,

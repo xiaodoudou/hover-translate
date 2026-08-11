@@ -1,9 +1,11 @@
 // Tracks what the pointer is over and decides when the trigger key means "translate this".
 //
-// A tap fires on key release, so a quick press works. Shortcuts stay safe because what actually
-// distinguishes Ctrl+C from a bare Ctrl is the second key, not how long the key was held: any other
-// keydown, a click or a wheel while the key is down cancels the press outright.
-// Holding the key past holdDelay starts sweep mode, where each block the pointer lands on translates.
+// Nothing happens until the key is released. While it is down the block under the pointer is only
+// outlined, so holding the key is how you aim and letting go is how you commit: the two cannot be
+// confused, and a press you think better of costs nothing as long as another key goes down first.
+// Shortcuts stay safe because what actually distinguishes Ctrl+C from a bare Ctrl is the second key,
+// not how long the key was held: any other keydown, a click or a wheel while the key is down cancels
+// the press outright.
 //
 // With triggerTaps at 2 the key must be tapped twice within doubleTapMs. Only the second press acts:
 // the first is remembered and does nothing, so the modifier keeps its ordinary meaning until the
@@ -12,14 +14,11 @@ export function installHover({ getConfig, onTrigger, onAim, onEscape }) {
   let hovered = null;
   let pointer = null;
   let keyHeld = false;
-  let firedThisPress = false;
   let cancelled = false;
   // Whether this press is the one that acts. Always true on a single-tap trigger; on a double-tap
   // trigger only the press that follows a clean tap in time.
   let armed = false;
   let lastTapAt = 0;
-  let timer = null;
-  let lastFired = null;
   let queued = false;
 
   // Mouse events go to the innermost frame under the pointer; key events go to whichever frame has
@@ -42,12 +41,8 @@ export function installHover({ getConfig, onTrigger, onAim, onEscape }) {
 
   const reset = () => {
     keyHeld = false;
-    firedThisPress = false;
     cancelled = false;
     armed = false;
-    lastFired = null;
-    clearTimeout(timer);
-    timer = null;
     onAim?.(null);
   };
 
@@ -61,27 +56,14 @@ export function installHover({ getConfig, onTrigger, onAim, onEscape }) {
   // Keeps keyHeld true so the pending keyup is swallowed rather than treated as a tap.
   const abort = () => {
     cancelled = true;
-    clearTimeout(timer);
-    timer = null;
     onAim?.(null);
   };
 
   const fire = (target) => {
     if (!target || !inThisFrame()) return;
-    firedThisPress = true;
-    lastFired = target;
-    // Handed over to the loading state: two markers on one block is noise, and in sweep mode the
-    // aim belongs to whatever the pointer reaches next.
+    // Handed over to the loading state: two markers on one block is noise.
     onAim?.(null);
     onTrigger(target);
-  };
-
-  const schedule = () => {
-    clearTimeout(timer);
-    const target = hovered;
-    timer = setTimeout(() => {
-      if (keyHeld && !cancelled) fire(target);
-    }, getConfig().holdDelay);
   };
 
   document.addEventListener(
@@ -97,7 +79,6 @@ export function installHover({ getConfig, onTrigger, onAim, onEscape }) {
         queued = false;
         if (!keyHeld || !armed || cancelled) return;
         showAim();
-        if (hovered !== lastFired) schedule();
       });
     },
     { passive: true, capture: true },
@@ -120,17 +101,14 @@ export function installHover({ getConfig, onTrigger, onAim, onEscape }) {
     reset();
     keyHeld = true;
     armed = triggerTaps !== 2 || paired;
-    if (armed) {
-      showAim();
-      schedule();
-    }
+    if (armed) showAim();
   };
 
   const onKeyUp = (event) => {
     if (event.key !== getConfig().triggerKey) return;
-    const clean = keyHeld && !cancelled && !firedThisPress;
+    const clean = keyHeld && !cancelled;
     // A clean tap that was not the acting press is the first half of a pair: remember when it ended
-    // so the next press can pair with it. Anything else, sweeping included, starts the count over.
+    // so the next press can pair with it. Anything else starts the count over.
     lastTapAt = clean && !armed ? Date.now() : 0;
     if (clean && armed) fire(hovered);
     reset();

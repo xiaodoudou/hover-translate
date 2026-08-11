@@ -68,6 +68,9 @@ export const CLASS_MARQUEE = "ht-marquee";
 // a transform needs an element to move, and moving a layout property instead costs a relayout of
 // the line on every frame.
 export const CLASS_MARQUEE_LINE = "ht-marquee-line";
+// The same wrapper when the cut was on the number of lines rather than on the width: it holds a
+// wrapped paragraph rather than one line, so it stacks instead of shrinking to the text.
+export const CLASS_MARQUEE_COLUMN = "ht-marquee-column";
 // Only while the line is actually moving: the ellipsis marks a cut that is not there mid-slide.
 export const CLASS_MARQUEE_MOVING = "ht-marquee-moving";
 export const CLASS_UNCLIPPED = "ht-unclipped";

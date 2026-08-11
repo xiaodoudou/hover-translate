@@ -12,6 +12,10 @@
   .pass { color: #15803d; } .fail { color: #b91c1c; font-weight: 700; }
   #stage { border: 1px solid #e2e8f0; padding: 1rem; margin-top: 2rem; opacity: .5; }
   .clip { display: block; width: 120px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* The other cut a page makes, taken from a real product card: the row is one line tall and hides
+     what wraps past it, and the title inside it is inline, so it cannot be measured for the cut. */
+  .row { width: 120px; height: 20px; overflow: hidden; line-height: 20px; }
+  .row > .title { display: inline; }
 </style>
 </head>
 <body>
@@ -619,9 +623,60 @@ check("with the growth it tried undone too",
   `${pinned.firstElementChild.getBoundingClientRect().height} vs ${oneLine}`);
 clearOverflow(pinned);
 
+// --- lines the page cut downwards instead ---------------------------------
+// A card gives the row the height its own language needed and hides the rest. Nothing about that is
+// visible from inside the block: the title is inline, so all four of its metrics are zero, and the
+// row doing the cutting is above it.
+const card = document.createElement("div");
+card.innerHTML = `<div class="row"><div class="title">A translated line far too long for this box</div></div>`;
+document.getElementById("stage").append(card);
+const cardRow = card.firstElementChild;
+const title = cardRow.firstElementChild;
+const cardHeight = card.getBoundingClientRect().height;
+check("an inline block cannot be measured for a cut at all",
+  title.clientWidth === 0 && title.clientHeight === 0 && title.scrollHeight === 0);
+check("and the row above it is hiding a whole line",
+  cardRow.scrollHeight - cardRow.clientHeight >= 20, `${cardRow.scrollHeight} vs ${cardRow.clientHeight}`);
+
+setClippedLines("fit");
+markOverflow(title);
+const column = cardRow.querySelector(".ht-marquee-line");
+const rise = column?.getAnimations().find((a) => a.id === "ht-marquee");
+const risen = rise?.effect.getKeyframes().map((f) => f.transform);
+check("the row above the block is what gets marked",
+  cardRow.classList.contains("ht-marquee") && !title.classList.contains("ht-marquee"));
+check("the wrapped paragraph rises through the window rather than sliding sideways",
+  risen?.length === 2 && risen.every((t) => t.startsWith("translateY")), JSON.stringify(risen));
+check("a lap starts with it below the window and ends with it above",
+  risen && parseFloat(risen[0].match(/-?[\d.]+/)[0]) === cardRow.clientHeight &&
+    parseFloat(risen[1].match(/-?[\d.]+/)[0]) === -cardRow.scrollHeight, JSON.stringify(risen));
+check("it stacks the lines rather than shrinking to one",
+  getComputedStyle(column).display === "block", getComputedStyle(column).display);
+check("and the card is exactly as tall as it was",
+  card.getBoundingClientRect().height === cardHeight,
+  `${card.getBoundingClientRect().height} vs ${cardHeight}`);
+
+clearOverflow(title);
+check("clearing reaches a box above the block, which no selector inside it could find",
+  !cardRow.classList.contains("ht-marquee") && !cardRow.querySelector(".ht-marquee-line"));
+check("and hands the row its own children back",
+  cardRow.firstElementChild === title && card.getBoundingClientRect().height === cardHeight);
+
+setClippedLines("grow");
+markOverflow(title);
+check("set to grow, the row takes the height its text needs",
+  cardRow.classList.contains("ht-unclipped") && cardRow.clientHeight >= 40,
+  `${cardRow.className} / ${cardRow.clientHeight}`);
+check("which is the whole point: nothing of it is hidden any more",
+  cardRow.scrollHeight - cardRow.clientHeight < 1, `${cardRow.scrollHeight} vs ${cardRow.clientHeight}`);
+clearOverflow(title);
+check("and the card is back to one line when the translation goes",
+  card.getBoundingClientRect().height === cardHeight,
+  `${card.getBoundingClientRect().height} vs ${cardHeight}`);
+setClippedLines("fit");
+
 // --- the trigger: one tap, or two -----------------------------------------
-// holdDelay is set out of reach so sweep mode never starts: what is under test here is the tap.
-const trigger = { triggerKey: "Control", triggerTaps: 1, holdDelay: 99000, doubleTapMs: 400 };
+const trigger = { triggerKey: "Control", triggerTaps: 1, doubleTapMs: 400 };
 const fired = [];
 installHover({ getConfig: () => trigger, onTrigger: (t) => fired.push(t), onEscape: () => {} });
 

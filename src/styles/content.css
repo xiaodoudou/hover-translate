@@ -152,6 +152,15 @@
   will-change: transform;
 }
 
+/* The same wrapper when the cut was on the number of lines rather than on the width. It holds a
+   wrapped paragraph rather than one line, so it takes the full width and stacks: shrinking to the
+   text, as the rule above does, would rewrap the very lines being moved. Order matters here, not
+   specificity: both are one class and both are important, so this has to come after that. */
+.ht-marquee-column {
+  display: block !important;
+  vertical-align: initial !important;
+}
+
 /* The other answer: keep the line and let the box grow. It grows downwards only, wrapping inside the
    width the page gave it, because that is the growth a page can usually absorb. Widening the box is
    what would push the rest of the layout out of place. */
