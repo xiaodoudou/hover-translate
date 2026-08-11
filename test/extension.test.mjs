@@ -624,6 +624,28 @@ try {
   await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: aimSpot.x, y: aimSpot.y, button: "none" });
   await sleep(120);
   const aimKey = { key: "Control", code: "ControlLeft", windowsVirtualKeyCode: 17, nativeVirtualKeyCode: 17 };
+  // Typing a key while the trigger is down cancels the press, which is how these holds end without
+  // translating anything on release.
+  const typeC = async () => {
+    for (const type of ["rawKeyDown", "keyUp"]) {
+      await page.send("Input.dispatchKeyEvent", {
+        type, key: "c", code: "KeyC", windowsVirtualKeyCode: 67, nativeVirtualKeyCode: 67, modifiers: 2,
+      });
+    }
+  };
+
+  // Off unless asked for: the key is held before every translation, so the page is left alone by
+  // default and the outline is something the user turns on.
+  await page.send("Input.dispatchKeyEvent", { type: "rawKeyDown", ...aimKey });
+  await sleep(300);
+  check("nothing is outlined while the key is held, until the setting is on",
+    (await ev(`document.querySelectorAll('.ht-aim').length`)) === 0);
+  await typeC();
+  await page.send("Input.dispatchKeyEvent", { type: "keyUp", ...aimKey });
+  await sleep(200);
+
+  await ev(`chrome.storage.sync.set({aimOutline: true})`);
+  await sleep(150);
   await page.send("Input.dispatchKeyEvent", { type: "rawKeyDown", ...aimKey });
   await sleep(250);
   const aimed = await aimShape();
@@ -646,11 +668,7 @@ try {
     (await ev(`document.querySelectorAll('.ht-aim').length`)) === 1);
 
   // The press that turns out to be a shortcut takes the outline with it, so nothing is left marked.
-  for (const type of ["rawKeyDown", "keyUp"]) {
-    await page.send("Input.dispatchKeyEvent", {
-      type, key: "c", code: "KeyC", windowsVirtualKeyCode: 67, nativeVirtualKeyCode: 67, modifiers: 2,
-    });
-  }
+  await typeC();
   await sleep(200);
   check("a shortcut being typed takes the outline away again",
     (await ev(`document.querySelectorAll('.ht-aim').length`)) === 0);
@@ -660,6 +678,7 @@ try {
     (await ev(`document.querySelectorAll('[data-ht-state]').length`)) === 0);
   check("leaving no class of ours on the block",
     (await ev(`${SEL.fr}.className.includes('ht-')`)) === false, await ev(`${SEL.fr}.className`));
+  await ev(`chrome.storage.sync.set({aimOutline: false})`);
 
   // --- every provider, driven through the real extension ----------------
   console.log("\neach provider serves a real page");

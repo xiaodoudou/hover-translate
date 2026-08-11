@@ -147,6 +147,7 @@ async function main() {
   // than on a select showing nothing.
   if (!$("clipped").value) $("clipped").value = DEFAULTS.clippedLines;
   $("trigger").value = triggerValue(settings.triggerKey, settings.triggerTaps);
+  $("aim").value = settings.aimOutline ? "yes" : "no";
 
   let currentOrder = settings.providerOrder;
   const paint = (order) => {
@@ -313,6 +314,7 @@ async function main() {
     setSettings({ triggerKey: key, triggerTaps: Number(taps) });
     setKeyHint(triggerLabel(key, Number(taps)));
   });
+  $("aim").addEventListener("change", (e) => setSettings({ aimOutline: e.target.value === "yes" }));
   $("minloading").addEventListener("input", (e) => {
     $("minloading-value").textContent = `${e.target.value} ms`;
     setSettings({ minLoadingMs: Number(e.target.value) });
