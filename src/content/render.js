@@ -132,6 +132,15 @@ export function applyBoth(block, text) {
   mark(block);
 }
 
+// Quick translate: the selection arrives knowing how to write itself and how to go back, since a
+// span in the page and a range of characters in a text field undo nothing alike. A field is not
+// marked at all, so the trigger key has nothing to revert there and the text stays as translated.
+export function applySelection(taken, text) {
+  if (!taken.editable) undos.set(taken.element, taken.restore);
+  taken.replace(text);
+  if (!taken.editable) mark(taken.element);
+}
+
 // Node-replacing path, used only when editing text cannot express the translation.
 export function apply(block, content) {
   snapshot(block);

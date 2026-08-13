@@ -231,6 +231,10 @@ try {
   check("marked translated", (await ev(`${SEL.zh}.getAttribute('data-ht-state')`)) === "translated");
   check("pulse cleared", (await ev(`${SEL.zh}.classList.contains('ht-pending')`)) === false);
   check("engine recorded", !!(await status())?.engine);
+  // One throw in the content script takes every feature with it, and each of them then fails as
+  // something else entirely. Asked here as well as at the end, so the first press is where it shows.
+  const thrown = () => page.logs.filter((l) => /exception/i.test(l));
+  check("and nothing in the extension threw getting there", thrown().length === 0, thrown().join(" | "));
 
   console.log("\nloading indicator and leftover styling");
   check("the loading state was shown while the request was in flight", (await ev(`window.__pending`)) > 0);
@@ -679,6 +683,144 @@ try {
   check("leaving no class of ours on the block",
     (await ev(`${SEL.fr}.className.includes('ht-')`)) === false, await ev(`${SEL.fr}.className`));
   await ev(`chrome.storage.sync.set({aimOutline: false})`);
+
+  // Quick translate. The trigger's own key by default, with the pointer saying which of the two
+  // meanings a press has, and where the words go is read off their writing system, which is why the
+  // two paragraphs travel opposite ways.
+  console.log("\na selection is translated where it sits");
+  const shift = { key: "Shift", code: "ShiftLeft", windowsVirtualKeyCode: 16, nativeVirtualKeyCode: 16 };
+  const quickCtrl = { key: "Control", code: "ControlLeft", windowsVirtualKeyCode: 17, nativeVirtualKeyCode: 17 };
+  const tapKey = async (key, modifiers, times) => {
+    for (let i = 0; i < times; i++) {
+      await page.send("Input.dispatchKeyEvent", { type: "rawKeyDown", ...key, modifiers });
+      await sleep(40);
+      await page.send("Input.dispatchKeyEvent", { type: "keyUp", ...key });
+      await sleep(80);
+    }
+  };
+  const tapQuick = (times = 2) => tapKey(shift, 8, times);
+  const tapTrigger = () => tapKey(quickCtrl, 2, 1);
+  const point = async (x, y) => {
+    await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y, button: "none" });
+    await sleep(80);
+  };
+  // Selecting and then pointing at what was selected, which is what a hand does and what the shared
+  // key reads: the pointer is how one press tells a selection from the block around it.
+  const select = async (id, from, to, aim = true) => {
+    const at = await ev(`(() => {
+      const el = document.getElementById(${JSON.stringify(id)});
+      el.scrollIntoView({block:'center'});
+      const range = document.createRange();
+      range.setStart(el.firstChild, ${from});
+      range.setEnd(el.firstChild, ${to});
+      const selection = getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      const rect = range.getClientRects()[0];
+      return { text: selection.toString(), x: Math.round(rect.left + rect.width / 2),
+               y: Math.round(rect.top + rect.height / 2) }; })()`);
+    if (aim) await point(at.x, at.y);
+    return at.text;
+  };
+  const quickSpan = (id) => `document.querySelector('#${id} [data-ht-state]')`;
+  const settle = async (expression, ms = 15000) => {
+    const deadline = Date.now() + ms;
+    while (Date.now() < deadline) {
+      if (await ev(expression)) return true;
+      await sleep(150);
+    }
+    return false;
+  };
+  const escape = async () => {
+    const esc = { key: "Escape", code: "Escape", windowsVirtualKeyCode: 27, nativeVirtualKeyCode: 27 };
+    await page.send("Input.dispatchKeyEvent", { type: "rawKeyDown", ...esc });
+    await page.send("Input.dispatchKeyEvent", { type: "keyUp", ...esc });
+    await sleep(400);
+  };
+
+  const hanWas = await ev(`document.getElementById('quick-han').textContent`);
+  const latinWas = await ev(`document.getElementById('quick-latin').textContent`);
+  const picked = await select("quick-han", 0, 9);
+  check("a range of text is selected", picked === "选中这句话的一部分", picked);
+  await tapTrigger();
+  const arrived = await settle(`(() => { const el = ${quickSpan("quick-han")};
+    return el && !el.classList.contains('ht-pending'); })()`);
+  const quickHan = await ev(`(() => { const el = ${quickSpan("quick-han")};
+    return el ? { text: el.textContent, whole: el.parentElement.textContent } : null; })()`);
+  console.log("   ", JSON.stringify(quickHan));
+  check("a tap of the trigger key on it replaces the selection", arrived && Boolean(quickHan), "nothing was replaced");
+  check("with words in the target language, not the ones selected",
+    Boolean(quickHan) && quickHan.text !== picked && !/[一-鿿]/.test(quickHan.text), quickHan?.text);
+  check("and the rest of the line is left exactly as it was",
+    Boolean(quickHan) && quickHan.whole.endsWith("其余的保持原样不动。"), quickHan?.whole);
+  await escape();
+  check("escape puts the selection back",
+    (await ev(`document.getElementById('quick-han').textContent`)) === hanWas);
+  // Not just the same words: taking the range out split the line into pieces, and a restore that
+  // left them apart would be an approximation of the page rather than the page.
+  check("as the one line the page had, not the pieces it was split into",
+    (await ev(`document.getElementById('quick-han').childNodes.length`)) === 1);
+
+  // The same key, pointed somewhere else: the selection is only what a press means where the press
+  // is, so this one has to walk past a selection that is still sitting there and take the block.
+  await select("quick-han", 0, 9, false);
+  await ctrlTap(SEL.zh);
+  check("pointing away from a selection takes the block instead",
+    (await ev(`(${SEL.zh}).getAttribute('data-ht-state')`)) === "translated");
+  check("and the selection it walked past is untouched",
+    (await ev(`document.getElementById('quick-han').textContent`)) === hanWas &&
+      (await ev(`!${quickSpan("quick-han")}`)) === true);
+  await escape();
+
+  // A key of its own takes the selection wherever it is, since nothing else could have been meant by
+  // pressing it. This one is deliberately pointed away from the text it acts on.
+  await ev(`chrome.storage.sync.set({quickKey: 'Shift', quickMap: {latin: 'zh'}})`);
+  await sleep(300);
+  await select("quick-latin", 0, 28, false);
+  await tapQuick();
+  await settle(`(() => { const el = ${quickSpan("quick-latin")};
+    return el && !el.classList.contains('ht-pending'); })()`);
+  const quickLatin = await ev(`(() => { const el = ${quickSpan("quick-latin")}; return el?.textContent ?? null; })()`);
+  console.log("   ", JSON.stringify(quickLatin));
+  check("latin text follows its own row of the mapping",
+    Boolean(quickLatin) && /[一-鿿]/.test(quickLatin), quickLatin);
+  await escape();
+  check("and it comes back as well",
+    (await ev(`document.getElementById('quick-latin').textContent`)) === latinWas);
+
+  // A field holds no nodes to wrap and nothing the page's selection API reports, so this is the
+  // other half of the feature and not a variation on the first: characters in a value. It is also
+  // the half that is an edit rather than a view, and the checks below are what that means.
+  await ev(`chrome.storage.sync.set({quickKey: 'trigger', quickMap: {}})`);
+  await sleep(300);
+  const fieldAt = await ev(`(() => { const el = document.getElementById('quick-field');
+    el.scrollIntoView({block:'center'}); el.focus(); el.setSelectionRange(0, 8);
+    const r = el.getBoundingClientRect();
+    return { value: el.value, x: Math.round(r.left + r.width / 2), y: Math.round(r.top + 8) }; })()`);
+  await point(fieldAt.x, fieldAt.y);
+  await tapTrigger();
+  await settle(`!/^这是输入框/.test(document.getElementById('quick-field').value)`);
+  const field = await ev(`(() => { const el = document.getElementById('quick-field');
+    return { value: el.value, state: el.getAttribute('data-ht-state') }; })()`);
+  console.log("   ", JSON.stringify(field));
+  check("text selected in a field is translated in the field",
+    field.value !== fieldAt.value && !/^这是输入框/.test(field.value), field.value);
+  check("and the characters outside the selection are untouched",
+    field.value.endsWith("，选中一部分再按快捷键。"), field.value);
+
+  // What is typed in a field is the user's own text, so a translation of it is an edit and not a
+  // state of the page: nothing marks it, the trigger key has nothing to undo there, and Esc leaves
+  // it alone. Anything else would take back the message you translated in order to send it.
+  check("the field carries no state of ours at all", field.state === null, String(field.state));
+  await tapTrigger();
+  await sleep(1200);
+  check("so the trigger key does not put the original back",
+    (await ev(`document.getElementById('quick-field').value`)) === field.value);
+  await escape();
+  check("and neither does escape",
+    (await ev(`document.getElementById('quick-field').value`)) === field.value);
+  await ev(`(() => { const el = document.getElementById('quick-field');
+    el.value = ${JSON.stringify(fieldAt.value)}; el.blur(); })()`);
 
   // --- every provider, driven through the real extension ----------------
   console.log("\neach provider serves a real page");

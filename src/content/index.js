@@ -10,13 +10,14 @@ import {
   hideImagePending,
 } from "./image.js";
 import { serialize, applyInPlace, rebuild } from "./richtext.js";
+import { takeSelection, selectionAt } from "./selection.js";
 import { installHover } from "./hover.js";
 import { toast } from "./toast.js";
 import { showBubble, hideBubble } from "./bubble.js";
 import { setClippedLines } from "./marquee.js";
 import * as render from "./render.js";
 import { translateTexts } from "../engine/index.js";
-import { getSettings, onSettingsChanged, DEFAULTS } from "../lib/settings.js";
+import { getSettings, onSettingsChanged, DEFAULTS, SHARED } from "../lib/settings.js";
 
 const settings = { ...DEFAULTS, ...(await getSettings().catch(() => ({}))) };
 render.setMarker(settings.displayMode);
@@ -170,6 +171,59 @@ async function handleImage(img) {
   }
 }
 
+// Whether the press was spent on a selection, so one shared with the trigger can fall back to the
+// block when there was no selection where the user was pointing.
+function handleSelection(at) {
+  if (orphaned) return false;
+  if (!contextAlive()) {
+    reportOrphaned();
+    return false;
+  }
+  const taken = takeSelection(at);
+  if (!taken) return false;
+  translateSelection(taken).catch(() => {});
+  return true;
+}
+
+// Quick translate. The selection is the whole of the request: no block is resolved, no markup is
+// kept, and the target language comes from the writing system the selection is in rather than from
+// the one setting, so the same key sends Chinese out to English and English back to Chinese.
+async function translateSelection(taken) {
+  const { element, text, group } = taken;
+  const map = settings.quickMap || {};
+  const targetLang = map[group] || map.other || settings.targetLang;
+
+  render.markPending(element);
+  const startedAt = Date.now();
+  try {
+    const result = await translateTexts([text], targetLang, settings.providerOrder, text);
+    const remaining = settings.minLoadingMs - (Date.now() - startedAt);
+    if (remaining > 0) await sleep(remaining);
+
+    if (result.same) {
+      toast(`Already ${result.sourceLang || "in the target language"}.`, { position: settings.toastPosition });
+      reportStatus({ engine: "skipped", sourceLang: result.sourceLang, ms: result.ms });
+      taken.restore();
+      return;
+    }
+    render.applySelection(taken, stripTags(result.texts[0]));
+    reportStatus({ engine: result.engine, sourceLang: result.sourceLang, ms: result.ms });
+  } catch (error) {
+    const message = String(error?.message || error);
+    // Nothing is left standing in the page on a failure: what was taken exists only to carry a
+    // translation, so without one the selection goes back exactly as it was.
+    taken.restore();
+    if (isOrphanError(message) || !contextAlive()) {
+      reportOrphaned();
+      return;
+    }
+    toast(`Hover Translate: ${message}`, { error: true, position: settings.toastPosition });
+    reportStatus({ error: message });
+  } finally {
+    render.clearPending(element);
+  }
+}
+
 async function handle(target) {
   // Restore first, and by ancestor rather than by block resolution: once the text is replaced the
   // layout shifts, so the pointer may be over a different element than the one that was translated.
@@ -300,7 +354,13 @@ installHover({
   // be translated rather than a guess at it. Nothing resolved means nothing would happen, and
   // showing no outline says exactly that. Called with the setting off too, so an outline drawn
   // before it was turned off still gets cleared.
-  onAim: (target) => render.aim(settings.aimOutline && target ? resolveBlock(target) : null),
+  onAim: (target, at) => {
+    // Sharing the key, a selection under the pointer is what a release would take, so outlining the
+    // block would be pointing at the wrong thing.
+    const quick = settings.quickKey === SHARED && at && selectionAt(at);
+    render.aim(settings.aimOutline && target && !quick ? resolveBlock(target) : null);
+  },
+  onQuick: handleSelection,
   onEscape: () => {
     render.clearAim();
     hideBubble();

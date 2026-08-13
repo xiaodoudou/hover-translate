@@ -1,4 +1,11 @@
-// Tracks what the pointer is over and decides when the trigger key means "translate this".
+// Tracks what the pointer is over and decides when a key means "translate this".
+//
+// Two things a key can mean here. The trigger acts on the block under the pointer; quick translate
+// acts on the selection instead. By default they are the same key, and the pointer says which was
+// meant: over a selection a press takes that, anywhere else it takes the block. Quick translate can
+// be given a key of its own, which then always means the selection wherever it is; that key cannot
+// be the trigger's own, since a double tap contains a single one and whichever was the shorter would
+// swallow the other before it finished.
 //
 // Nothing happens until the key is released. While it is down the block under the pointer is only
 // outlined, so holding the key is how you aim and letting go is how you commit: the two cannot be
@@ -7,18 +14,14 @@
 // not how long the key was held: any other keydown, a click or a wheel while the key is down cancels
 // the press outright.
 //
-// With triggerTaps at 2 the key must be tapped twice within doubleTapMs. Only the second press acts:
-// the first is remembered and does nothing, so the modifier keeps its ordinary meaning until the
-// user asks for it twice. Everything after that is identical, holding the second press included.
-export function installHover({ getConfig, onTrigger, onAim, onEscape }) {
+// With two taps the key must be tapped twice within doubleTapMs. Only the second press acts: the
+// first is remembered and does nothing, so the modifier keeps its ordinary meaning until the user
+// asks for it twice. Everything after that is identical, holding the second press included.
+import { SHARED } from "../lib/settings.js";
+
+export function installHover({ getConfig, onTrigger, onAim, onEscape, onQuick }) {
   let hovered = null;
   let pointer = null;
-  let keyHeld = false;
-  let cancelled = false;
-  // Whether this press is the one that acts. Always true on a single-tap trigger; on a double-tap
-  // trigger only the press that follows a clean tap in time.
-  let armed = false;
-  let lastTapAt = 0;
   let queued = false;
 
   // Mouse events go to the innermost frame under the pointer; key events go to whichever frame has
@@ -33,31 +36,74 @@ export function installHover({ getConfig, onTrigger, onAim, onEscape }) {
     return Boolean(at) && at.tagName !== "IFRAME" && at.tagName !== "FRAME";
   };
 
+  // One press counter per key that means something. The key is read on every event rather than kept,
+  // so changing it in the popup takes effect on the next press instead of the next page load.
+  function counter({ keyOf, tapsOf, onArm, onCommit, onDrop }) {
+    let keyHeld = false;
+    let cancelled = false;
+    // Whether this press is the one that acts. Always true on a single-tap key; on a double-tap key
+    // only the press that follows a clean tap in time.
+    let armed = false;
+    let lastTapAt = 0;
+
+    const reset = () => {
+      keyHeld = false;
+      cancelled = false;
+      armed = false;
+      onDrop?.();
+    };
+
+    // Keeps keyHeld true so the pending keyup is swallowed rather than treated as a tap.
+    const abort = () => {
+      if (!keyHeld) return;
+      cancelled = true;
+      onDrop?.();
+    };
+
+    return {
+      get live() {
+        return keyHeld && armed && !cancelled;
+      },
+      reset,
+      // A half-finished pair must not survive the user leaving: coming back to the tab and pressing
+      // the key once would otherwise act on whatever is under the pointer or selected.
+      forget() {
+        lastTapAt = 0;
+        reset();
+      },
+      abort,
+      keyDown(event) {
+        const key = keyOf();
+        if (!key) return;
+        if (event.key !== key) {
+          abort();
+          // A key in between is a shortcut being typed, not a pair being completed.
+          lastTapAt = 0;
+          return;
+        }
+        if (event.repeat || keyHeld) return;
+        reset();
+        keyHeld = true;
+        armed = tapsOf() !== 2 || Date.now() - lastTapAt < getConfig().doubleTapMs;
+        if (armed) onArm?.();
+      },
+      keyUp(event) {
+        if (event.key !== keyOf()) return;
+        const clean = keyHeld && !cancelled;
+        // A clean tap that was not the acting press is the first half of a pair: remember when it
+        // ended so the next press can pair with it. Anything else starts the count over.
+        lastTapAt = clean && !armed ? Date.now() : 0;
+        const act = clean && armed;
+        if (act) onCommit();
+        reset();
+      },
+    };
+  }
+
   // What a release right now would act on, so the user can see it before committing. Only while the
   // press is armed: on a double-tap trigger the first press does nothing, and showing a target for
   // it would promise something that is not going to happen.
-  const showAim = () =>
-    onAim?.(keyHeld && armed && !cancelled && inThisFrame() ? hovered : null);
-
-  const reset = () => {
-    keyHeld = false;
-    cancelled = false;
-    armed = false;
-    onAim?.(null);
-  };
-
-  // A half-finished pair must not survive the user leaving: coming back to the tab and pressing the
-  // key once would otherwise translate whatever happens to be under the pointer.
-  const forget = () => {
-    lastTapAt = 0;
-    reset();
-  };
-
-  // Keeps keyHeld true so the pending keyup is swallowed rather than treated as a tap.
-  const abort = () => {
-    cancelled = true;
-    onAim?.(null);
-  };
+  const showAim = () => onAim?.(trigger.live && inThisFrame() ? hovered : null, pointer);
 
   const fire = (target) => {
     if (!target || !inThisFrame()) return;
@@ -66,6 +112,34 @@ export function installHover({ getConfig, onTrigger, onAim, onEscape }) {
     onTrigger(target);
   };
 
+  const shares = () => getConfig().quickKey === SHARED;
+
+  const trigger = counter({
+    keyOf: () => getConfig().triggerKey,
+    tapsOf: () => getConfig().triggerTaps,
+    onArm: showAim,
+    // Sharing the key, the selection is asked first: it is the more exact of the two instructions,
+    // and it answers only for a selection the pointer is actually on.
+    onCommit: () => {
+      if (shares() && inThisFrame() && onQuick?.(pointer)) return;
+      fire(hovered);
+    },
+    onDrop: () => onAim?.(null),
+  });
+
+  // Silent whenever it would answer to the trigger's key: that press is already counted above, and
+  // counting it twice would fire both meanings at once.
+  const quick = counter({
+    keyOf: () => {
+      const { quickKey, triggerKey } = getConfig();
+      return quickKey && quickKey !== SHARED && quickKey !== triggerKey ? quickKey : "";
+    },
+    tapsOf: () => getConfig().quickTaps,
+    onCommit: () => onQuick?.(),
+  });
+
+  const counters = [trigger, quick];
+
   document.addEventListener(
     "mousemove",
     (event) => {
@@ -73,12 +147,11 @@ export function installHover({ getConfig, onTrigger, onAim, onEscape }) {
       // whose own text is empty, so a shadow-rendered message would never resolve to anything.
       hovered = event.composedPath?.()[0] || event.target;
       pointer = { x: event.clientX, y: event.clientY };
-      if (!keyHeld || !armed || cancelled || queued) return;
+      if (!trigger.live || queued) return;
       queued = true;
       requestAnimationFrame(() => {
         queued = false;
-        if (!keyHeld || !armed || cancelled) return;
-        showAim();
+        if (trigger.live) showAim();
       });
     },
     { passive: true, capture: true },
@@ -89,34 +162,20 @@ export function installHover({ getConfig, onTrigger, onAim, onEscape }) {
       onEscape();
       return;
     }
-    if (event.key !== getConfig().triggerKey) {
-      if (keyHeld) abort();
-      // A key in between is a shortcut being typed, not a pair being completed.
-      lastTapAt = 0;
-      return;
-    }
-    if (event.repeat || keyHeld) return;
-    const { triggerTaps, doubleTapMs } = getConfig();
-    const paired = Date.now() - lastTapAt < doubleTapMs;
-    reset();
-    keyHeld = true;
-    armed = triggerTaps !== 2 || paired;
-    if (armed) showAim();
+    for (const press of counters) press.keyDown(event);
   };
 
   const onKeyUp = (event) => {
-    if (event.key !== getConfig().triggerKey) return;
-    const clean = keyHeld && !cancelled;
-    // A clean tap that was not the acting press is the first half of a pair: remember when it ended
-    // so the next press can pair with it. Anything else starts the count over.
-    lastTapAt = clean && !armed ? Date.now() : 0;
-    if (clean && armed) fire(hovered);
-    reset();
+    for (const press of counters) press.keyUp(event);
   };
 
   // Ctrl+click opens a link and Ctrl+wheel zooms; neither is a translate request.
-  const onMouseDown = () => keyHeld && abort();
-  const onWheel = () => keyHeld && abort();
+  const onAbort = () => {
+    for (const press of counters) press.abort();
+  };
+  const onForget = () => {
+    for (const press of counters) press.forget();
+  };
 
   // Key events reach only the focused document, so a framed page needs the listeners on the top one
   // too. Cross-origin frames cannot reach it and simply keep their own; those still work whenever
@@ -131,10 +190,10 @@ export function installHover({ getConfig, onTrigger, onAim, onEscape }) {
   for (const target of keyTargets) {
     target.addEventListener("keydown", onKeyDown, { capture: true });
     target.addEventListener("keyup", onKeyUp, { capture: true });
-    target.addEventListener("mousedown", onMouseDown, { capture: true });
-    target.addEventListener("wheel", onWheel, { passive: true, capture: true });
+    target.addEventListener("mousedown", onAbort, { capture: true });
+    target.addEventListener("wheel", onAbort, { passive: true, capture: true });
   }
 
-  window.addEventListener("blur", forget);
-  document.addEventListener("visibilitychange", forget);
+  window.addEventListener("blur", onForget);
+  document.addEventListener("visibilitychange", onForget);
 }
