@@ -184,5 +184,17 @@ const total = items.reduce((a, b) =&gt; a + b, 0);</code></pre>
   <p class="expect">Short text still works. Same-language text is skipped with a notice.</p>
 </section>
 
+<h2>A selection, translated where it sits</h2>
+<section>
+  <p id="quick-han" lang="zh-CN">选中这句话的一部分，只有被选中的文字会被替换，其余的保持原样不动。</p>
+  <p id="quick-latin" lang="en">Select part of this sentence, and only the words inside the selection
+  are replaced, leaving the rest of the line exactly as it was.</p>
+  <textarea id="quick-field" rows="2" cols="40">这是输入框里的文字，选中一部分再按快捷键。</textarea>
+  <p class="expect">Select some text and tap the quick key twice. The selection is replaced where it
+  sits and Esc puts it back. Which language it goes to follows the writing system it is in, so these
+  two go opposite ways. The last one is a field: nothing in it is in the page's selection at all, so
+  it is taken as a range of characters in its value instead.</p>
+</section>
+
 </body>
 </html>

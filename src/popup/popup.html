@@ -11,6 +11,7 @@
       Point at text, tap <kbd id="key-hint">Ctrl</kbd>.<br>
       Point at an image, tap <kbd class="key-hint">Ctrl</kbd> to read it too.<br>
       Tap <kbd class="key-hint">Ctrl</kbd> again to restore.<br>
+      <span id="quick-step">Select text, tap <kbd id="quick-hint">Shift twice</kbd>.<br></span>
       Tap <kbd>Esc</kbd> to restore the page.
     </p>
   </section>
@@ -72,18 +73,33 @@
       </div>
     </div>
 
+    <h3>Quick translate</h3>
+
+    <label for="quick">Translate the selection</label>
+    <select id="quick"></select>
+    <p class="hint italic">Select any text and tap the key: that text is replaced where it sits, and
+    Esc puts it back. On the trigger key, which is the default, a press takes the selection when you
+    are pointing at it and the block under the pointer otherwise.</p>
+    <p class="hint italic">Text selected in a search box, a comment field or any other input is
+    replaced there too, which is how you send a message out in a language you do not write. That one
+    is an edit rather than a view: it stays translated, and the field's own undo is what takes it
+    back. In the page, the selection is replaced as plain text, so links and bold inside it do not
+    survive.</p>
+
+    <div id="quick-map">
+      <p class="hint">Where a selection goes, by the writing system it is in; a row left as Same as
+      above uses Translate to at the top. Script is all a short selection can be sorted by for free:
+      it tells Chinese from Russian from English, but not French from English, nor Mandarin from
+      Cantonese.</p>
+      <div class="split" id="quick-rows"></div>
+    </div>
+
     <h3>Other</h3>
 
     <label for="trigger">Trigger key</label>
-    <select id="trigger">
-      <option value="Control:1">Ctrl</option>
-      <option value="Alt:1">Alt</option>
-      <option value="Shift:1">Shift</option>
-      <option value="Control:2">Ctrl twice</option>
-      <option value="Alt:2">Alt twice</option>
-      <option value="Shift:2">Shift twice</option>
-    </select>
-    <p class="hint italic">Tapping twice is harder to trigger by accident.</p>
+    <select id="trigger"></select>
+    <p class="hint italic">Tapping twice is harder to trigger by accident. Alt is not offered:
+    the browser answers a bare Alt by focusing its own toolbar, taking the key with it.</p>
 
     <label for="aim">Outline what would be translated</label>
     <select id="aim">

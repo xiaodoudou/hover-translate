@@ -53,6 +53,28 @@ export function languageFromScript(text) {
   return null;
 }
 
+// Which row of the quick-translate mapping a stretch of text belongs to. The writing system is all
+// that can be read off the text itself, and it is free and certain as far as it goes: it separates
+// Chinese from Russian from English without a detector. It stops where an alphabet is shared, so
+// French and English are one group, and so are Mandarin and Cantonese.
+//
+// The most-used script wins rather than the first one found, since a Korean sentence with two hanja
+// in it is Korean. Kana is the exception: Japanese prose has more kanji than kana and is still
+// Japanese, so any kana at all settles it.
+export function scriptGroup(text) {
+  const tally = new Map();
+  for (const char of text) {
+    for (const [name, pattern] of SCRIPTS) {
+      if (!pattern.test(char)) continue;
+      tally.set(name, (tally.get(name) || 0) + 1);
+      break;
+    }
+  }
+  if (!tally.size) return "latin";
+  if (tally.has("kana")) return "kana";
+  return [...tally.entries()].sort((a, b) => b[1] - a[1])[0][0];
+}
+
 // Picks the best detector candidate the text's own writing system actually supports.
 export function pickLanguage(candidates, text, minConfidence = 0.4) {
   const ranked = (candidates || []).filter((c) => c.detectedLanguage && c.detectedLanguage !== "und");

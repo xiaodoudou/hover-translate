@@ -27,6 +27,9 @@
 <code>script.js</code> against the fixture DOM. Serve the extension folder over http and open this
 page: module imports do not work from <code>file://</code>.</p>
 <div id="results">running...</div>
+<p id="quick-words">Words for the quick key to have something to act on.</p>
+<input id="quick-field" type="text">
+<textarea id="quick-area">Text nobody but the person typing it owns.</textarea>
 <div id="stage"></div>
 
 <script type="module">
@@ -35,8 +38,9 @@ import { resolveImage, imageUrl, showImageOverlay, hideImageOverlay, hideAllImag
          showImagePending, hideImagePending } from "../src/content/image.js";
 import { serialize, applyInPlace, rebuild } from "../src/content/richtext.js";
 import { markOverflow, clearOverflow, setClippedLines } from "../src/content/marquee.js";
-import { hasScriptForeignTo, pickLanguage, languageFromScript } from "../src/lib/script.js";
+import { hasScriptForeignTo, pickLanguage, languageFromScript, scriptGroup } from "../src/lib/script.js";
 import { installHover } from "../src/content/hover.js";
+import { takeSelection, selectionAt } from "../src/content/selection.js";
 
 const out = [];
 let failures = 0;
@@ -349,6 +353,21 @@ check("genuine english is still detected as english",
   pickLanguage([{ detectedLanguage: "en", confidence: 0.95 }], "This paragraph is already in English.") === "en");
 check("low confidence on latin text yields nothing",
   pickLanguage([{ detectedLanguage: "en", confidence: 0.1 }], "hmm") === null);
+
+// --- which row of the quick-translate mapping a selection lands in ---------
+check("plain english is latin", scriptGroup("Select part of this sentence.") === "latin");
+check("french is latin too, since no script separates them",
+  scriptGroup("Le chat dort sur le canapé rouge.") === "latin");
+check("digits and punctuation alone are latin", scriptGroup("2026-07-18 :: 3312870") === "latin");
+check("chinese is han", scriptGroup(MIXED) === "han");
+check("japanese is kana even where kanji outnumber it",
+  scriptGroup("これは日本語のテスト用の段落です。翻訳の対象。") === "kana");
+check("korean with a stray hanja is still korean",
+  scriptGroup("이것은 한국어 문단입니다 韓") === "hangul");
+check("russian is cyrillic", scriptGroup("Это тестовый абзац на русском языке.") === "cyrillic");
+check("arabic is arabic", scriptGroup("هذه فقرة اختبارية باللغة العربية.") === "arabic");
+// Nothing in the mapping answers to thai, so it has to fall through to the catch-all row.
+check("a script with no row of its own is not latin", scriptGroup("นี่คือการทดสอบ") === "thai");
 
 // --- a wrapper is never the target ----------------------------------------
 // Pointing at the gap between a header, an article and a footer used to resolve to the element
@@ -755,6 +774,130 @@ press("keyup");
 check("a shortcut in between does not complete the pair", fired.length === 0, `fired ${fired.length}`);
 tap();
 check("and the broken pair is not resumed by the next tap", fired.length === 0, `fired ${fired.length}`);
+
+// --- quick translate: a key of its own, counted the same way ---------------
+const quickConfig = { triggerKey: "Control", triggerTaps: 1, doubleTapMs: 400, quickKey: "Shift", quickTaps: 2 };
+const quickFired = [];
+installHover({
+  getConfig: () => quickConfig,
+  onTrigger: () => {},
+  onQuick: () => quickFired.push(1),
+  onEscape: () => {},
+});
+const tapQuick = () => { press("keydown", "Shift"); press("keyup", "Shift"); };
+
+tapQuick();
+check("one tap of the quick key does nothing", quickFired.length === 0, `fired ${quickFired.length}`);
+tapQuick();
+check("and the second tap translates the selection", quickFired.length === 1, `fired ${quickFired.length}`);
+
+// Shift is held for a capital, not for this, and the letter in between is what says so.
+quickFired.length = 0;
+press("keydown", "Shift");
+press("keydown", "a");
+press("keyup", "a");
+press("keyup", "Shift");
+tapQuick();
+check("typing a capital is not one half of a pair", quickFired.length === 0, `fired ${quickFired.length}`);
+
+quickFired.length = 0;
+tap();
+tap();
+check("the trigger's own key never means quick translate", quickFired.length === 0, `fired ${quickFired.length}`);
+
+// One of the two would have to win every press, and the loser would be the one the user meant.
+quickConfig.quickKey = "Control";
+quickFired.length = 0;
+tap();
+tap();
+check("a quick key set to the trigger's key is off", quickFired.length === 0, `fired ${quickFired.length}`);
+
+// --- one key for both, the pointer saying which ---------------------------
+// The default. A press asks the selection first and falls through to the block when the answer is
+// no, so the two meanings never both happen and never both refuse.
+const sharedConfig = { triggerKey: "Control", triggerTaps: 1, doubleTapMs: 400, quickKey: "trigger", quickTaps: 2 };
+const sharedBlocks = [];
+const sharedAsked = [];
+let selectionAnswers = false;
+installHover({
+  getConfig: () => sharedConfig,
+  onTrigger: (target) => sharedBlocks.push(target),
+  onQuick: (at) => { sharedAsked.push(at); return selectionAnswers; },
+  onEscape: () => {},
+});
+
+move();
+tap();
+check("the selection is asked first, and told where the pointer is",
+  sharedAsked.length === 1 && typeof sharedAsked[0]?.x === "number", JSON.stringify(sharedAsked[0]));
+check("and with no selection there the press takes the block", sharedBlocks.length === 1, `took ${sharedBlocks.length}`);
+
+selectionAnswers = true;
+sharedBlocks.length = 0;
+tap();
+check("a press the selection answered does not also take the block",
+  sharedBlocks.length === 0, `took ${sharedBlocks.length}`);
+selectionAnswers = false;
+
+// --- what a selection hands over ------------------------------------------
+// A field is not in the DOM the way the page's own text is: no selection API reports what is
+// highlighted inside it, so it is taken as a range of characters in the value instead.
+const field = document.getElementById("quick-field");
+field.value = "Words for the quick key to have something to act on.";
+field.focus();
+field.setSelectionRange(0, 5);
+const takenField = takeSelection();
+check("text selected in a field is taken", takenField?.text === "Words", JSON.stringify(takenField?.text));
+check("and the field itself is what carries the state", takenField?.element === field);
+takenField.replace("Mots");
+check("replacing writes into the value, leaving the rest alone",
+  field.value === "Mots for the quick key to have something to act on.", JSON.stringify(field.value));
+takenField.restore();
+check("and restoring puts the characters back",
+  field.value === "Words for the quick key to have something to act on.", JSON.stringify(field.value));
+
+check("and a field says it is the user's own text, so nothing marks it", takenField.editable === true);
+
+// A password would go out to a translation endpoint like any other string, and a locked field is
+// one nothing could be written back to.
+field.type = "password";
+field.setSelectionRange(0, 5);
+check("a password field hands over nothing", takeSelection() === null);
+field.type = "text";
+field.readOnly = true;
+field.setSelectionRange(0, 5);
+check("nor does a readonly one", takeSelection() === null);
+field.readOnly = false;
+
+// The trigger has nothing to say inside a field either, so the two never argue over one.
+check("an editable field is not a block the trigger can take", resolveBlock(field) === null);
+check("nor is a textarea", resolveBlock(document.getElementById("quick-area")) === null);
+field.blur();
+
+const words = document.getElementById("quick-words");
+const range = document.createRange();
+range.selectNodeContents(words);
+getSelection().removeAllRanges();
+getSelection().addRange(range);
+// Sharing the trigger's key, a press means the selection only where the selection is: asked with a
+// pointer, this is the question "is that what you are pointing at", not "is anything selected".
+const spot = words.getBoundingClientRect();
+check("a selection under the pointer answers",
+  Boolean(selectionAt({ x: spot.left + 4, y: spot.top + spot.height / 2 })));
+check("one the pointer is nowhere near does not",
+  selectionAt({ x: spot.right + 300, y: spot.top - 200 }) === null);
+check("and asked with no pointer at all it answers wherever it is", Boolean(selectionAt()));
+
+const takenRange = takeSelection();
+check("text in the page is taken as a span of its own",
+  takenRange?.element?.tagName === "SPAN" && takenRange.element.parentElement === words);
+check("which is ours to put back, so it is marked and undone like a block", !takenRange.editable);
+takenRange.replace("Remplacé");
+check("that is where the translation goes", words.textContent === "Remplacé", words.textContent);
+takenRange.restore();
+check("and putting it back leaves the one text node the page had",
+  words.childNodes.length === 1 && words.textContent.startsWith("Words for"), words.childNodes.length);
+getSelection().removeAllRanges();
 
 document.getElementById("results").innerHTML =
   out.join("\n") + `\n\n${failures === 0 ? "ALL PASS" : failures + " FAILURE(S)"}`;

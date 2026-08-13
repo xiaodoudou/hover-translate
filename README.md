@@ -57,6 +57,7 @@ the failover moves on to Lens.
 | Hover text, tap <kbd>Ctrl</kbd> | Translates the block under the pointer |
 | Hover an image, tap <kbd>Ctrl</kbd> | Reads the image and lays the translation over it |
 | Hold <kbd>Ctrl</kbd> | Translates nothing, and outlines the block that would be, if you asked for that |
+| Select text, tap <kbd>Ctrl</kbd> on it | Replaces just the selection, in the page or in a field |
 | Tap <kbd>Ctrl</kbd> on a translated block or image | Restores it |
 | <kbd>Esc</kbd> | Restores every block and image on the page |
 
@@ -73,6 +74,60 @@ nothing would happen there. It is an outline rather than a border because an out
 outside the box and takes no space at all: the element keeps its size, nothing reflows, and no word
 moves under the pointer while you are aiming at it. On a double-tap trigger only the second press
 outlines anything, since the first one does nothing.
+
+## Quick translate
+
+The trigger takes whole blocks, which is right for a paragraph and useless for half of one. Quick
+translate takes the selection instead: select any text, tap <kbd>Ctrl</kbd> on it, and those words are
+replaced where they sit. In the page that is a view like any other translation, so <kbd>Esc</kbd>
+puts it back, and so does the trigger key tapped on it.
+
+It is the trigger's own key by default, and the pointer is what tells the two meanings apart. A press
+over the selection takes the selection; a press anywhere else takes the block under the pointer, as
+it always did. A selection left behind somewhere else on the page is not what a press means, because
+what you are pointing at is. Quick translate can be given a key of its own instead, and that key then
+means the selection wherever it is; it cannot be the trigger's own, since a double tap contains a
+single one and whichever was the shorter would swallow the other.
+
+Text selected inside an input or a textarea is replaced there too, which is how you send a message
+out in a language you do not write: type it in your own, select it, tap. A field holds no nodes to
+work with and nothing the page's selection API reports, so that text is taken as a range of
+characters in the field's value instead.
+
+A field also differs from the page in the way that matters most here: what is in it is your text, not
+the page's, so translating it is an edit and not a view of something. The field keeps the
+translation, the trigger key has nothing to undo there, and <kbd>Esc</kbd> leaves it alone; taking
+back the message you translated in order to send it would be the one unforgivable thing this could
+do. The field's own undo is the way back, which is why the write goes through the browser's editing
+command rather than assigning to the value: that is also what tells a framework holding the value
+what changed. Passwords are refused outright, since they would be sent to a translation endpoint like
+any other string, and so are readonly and disabled fields, which nothing could be written back to.
+
+<kbd>Alt</kbd> is not offered for either. The browser answers a bare <kbd>Alt</kbd> by moving focus to
+its own toolbar, which takes the keys with it and blurs the page, so a tap of it is one the page
+hears the beginning of and never the end.
+
+Where a selection goes is read off the writing system it is in rather than from a language detector,
+which costs nothing and cannot be wrong about what it does answer:
+
+| The selection is written in | Where it goes |
+| --- | --- |
+| Latin: English, French, Spanish, German | its own row |
+| Han, Japanese, Korean, Cyrillic, Arabic | one row each |
+| anything else | the last row |
+
+Every row starts empty, meaning the target language at the top of the popup, so only the direction
+that differs from it needs setting. Reading Chinese pages with English as your target needs no rows
+at all; sending English back out to Chinese is one row.
+
+A script tells Chinese from Russian from English for free. It stops where an alphabet is shared:
+French and English are one row, and so are Mandarin and Cantonese, because nothing in the characters
+says which of the two it is. Separating those needs a detector, and a selection is often a handful of
+words, which is exactly where detectors are least reliable.
+
+In the page, the selection is replaced as plain text, so a link or a bold word inside it does not
+survive; a press that takes the block is the one that keeps markup. Rich editors are left alone,
+since the wrapper this needs would be serialised into whatever you are writing.
 
 ## Display modes
 

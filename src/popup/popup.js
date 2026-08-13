@@ -1,4 +1,4 @@
-import { getSettings, setSettings, DEFAULTS } from "../lib/settings.js";
+import { getSettings, setSettings, DEFAULTS, KEYS, SHARED } from "../lib/settings.js";
 
 const LANGUAGES = [
   ["en", "English"], ["zh", "Chinese"], ["zh-Hant", "Chinese (traditional)"], ["ja", "Japanese"],
@@ -28,11 +28,46 @@ const $ = (id) => document.getElementById(id);
 const setKeyHint = (label) => {
   for (const el of document.querySelectorAll("#key-hint, .key-hint")) el.textContent = label;
 };
-const KEY_LABELS = { Control: "Ctrl", Alt: "Alt", Shift: "Shift" };
+const KEY_LABELS = { Control: "Ctrl", Shift: "Shift" };
 // The select carries both halves of the trigger in one value, because "Ctrl twice" is one choice to
 // the user even though it is two settings underneath.
 const triggerValue = (key, taps) => `${key}:${taps === 2 ? 2 : 1}`;
 const triggerLabel = (key, taps) => (taps === 2 ? `${KEY_LABELS[key]} twice` : KEY_LABELS[key]);
+// Both selects are filled from the one list of keys that can actually be counted, so neither can
+// offer a key the rest of the extension refuses.
+const KEY_CHOICES = [...KEYS.map((key) => [key, 1]), ...KEYS.map((key) => [key, 2])];
+const fillKeys = (select) => {
+  for (const [key, taps] of KEY_CHOICES) select.append(new Option(triggerLabel(key, taps), triggerValue(key, taps)));
+};
+// The quick select carries a third kind of answer beside a key and off: riding the trigger's press.
+const quickChoice = (key, taps) => (key && key !== SHARED ? triggerValue(key, taps) : key);
+const keyOfChoice = (value) => value.split(":")[0];
+
+// Named by writing system rather than by language, because that is what a selection can be sorted by
+// without asking anyone: the popup should not promise a distinction the code cannot make.
+const QUICK_GROUPS = [
+  ["latin", "Latin (EN, FR, ES)"],
+  ["han", "Han (Chinese)"],
+  ["kana", "Japanese"],
+  ["hangul", "Korean"],
+  ["cyrillic", "Cyrillic (RU, UK)"],
+  ["arabic", "Arabic"],
+  ["other", "Everything else"],
+];
+
+// Neither key may answer to the other's, so each list greys out what the other one took. Greying out
+// rather than reassigning: the setting the user did not touch is not the extension's to change.
+// Only a key of its own can clash, and only with the trigger's: sharing that key is a choice of its
+// own here, and off clashes with nothing.
+function paintKeyChoices(triggerKey, quickKey) {
+  const taken = quickKey && quickKey !== SHARED ? quickKey : "";
+  for (const option of $("trigger").options) {
+    option.disabled = Boolean(taken) && keyOfChoice(option.value) === taken;
+  }
+  for (const option of $("quick").options) {
+    option.disabled = option.value !== SHARED && Boolean(option.value) && keyOfChoice(option.value) === triggerKey;
+  }
+}
 
 // The list is the failover order: enabled ids first, in the user's order, disabled ones after.
 function renderProviders(order, onChange, listId = "providers", all = ALL_PROVIDERS) {
@@ -146,8 +181,44 @@ async function main() {
   // Anyone still holding the "always slide" setting that was dropped lands on the default rather
   // than on a select showing nothing.
   if (!$("clipped").value) $("clipped").value = DEFAULTS.clippedLines;
+  fillKeys($("trigger"));
   $("trigger").value = triggerValue(settings.triggerKey, settings.triggerTaps);
   $("aim").value = settings.aimOutline ? "yes" : "no";
+
+  $("quick").append(new Option("With the trigger key (default)", SHARED));
+  $("quick").append(new Option("Off", ""));
+  fillKeys($("quick"));
+  $("quick").value = quickChoice(settings.quickKey, settings.quickTaps);
+  paintKeyChoices(settings.triggerKey, settings.quickKey);
+
+  let quickMap = settings.quickMap;
+  const rows = $("quick-rows");
+  for (const [group, label] of QUICK_GROUPS) {
+    const cell = document.createElement("div");
+    const name = document.createElement("label");
+    name.htmlFor = `quick-${group}`;
+    name.textContent = label;
+    const select = document.createElement("select");
+    select.id = `quick-${group}`;
+    select.append(new Option("Same as above", ""));
+    for (const [code, language] of LANGUAGES) select.append(new Option(`${language} (${code})`, code));
+    select.value = quickMap[group] || "";
+    select.addEventListener("change", () => {
+      quickMap = { ...quickMap, [group]: select.value };
+      setSettings({ quickMap });
+    });
+    cell.append(name, select);
+    rows.append(cell);
+  }
+
+  const showQuick = (value) => {
+    $("quick-map").hidden = !value;
+    $("quick-step").hidden = !value;
+    if (!value) return;
+    const [key, taps] = value === SHARED ? $("trigger").value.split(":") : value.split(":");
+    $("quick-hint").textContent = triggerLabel(key, Number(taps));
+  };
+  showQuick($("quick").value);
 
   let currentOrder = settings.providerOrder;
   const paint = (order) => {
@@ -313,6 +384,21 @@ async function main() {
     const [key, taps] = e.target.value.split(":");
     setSettings({ triggerKey: key, triggerTaps: Number(taps) });
     setKeyHint(triggerLabel(key, Number(taps)));
+    // The key it just took cannot also be quick translate's own, and the honest reading of a clash
+    // is that both meanings are on the one press.
+    if (keyOfChoice($("quick").value) === key) {
+      $("quick").value = SHARED;
+      setSettings({ quickKey: SHARED });
+    }
+    paintKeyChoices(key, keyOfChoice($("quick").value));
+    showQuick($("quick").value);
+  });
+  $("quick").addEventListener("change", (e) => {
+    const value = e.target.value;
+    const [key = "", taps] = value.split(":");
+    setSettings(value === SHARED ? { quickKey: SHARED } : { quickKey: key, quickTaps: Number(taps) || 2 });
+    showQuick(value);
+    paintKeyChoices(keyOfChoice($("trigger").value), key);
   });
   $("aim").addEventListener("change", (e) => setSettings({ aimOutline: e.target.value === "yes" }));
   $("minloading").addEventListener("input", (e) => {
