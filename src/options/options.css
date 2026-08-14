@@ -21,15 +21,62 @@
 
 body {
   box-sizing: border-box;
-  width: 320px;
-  margin: 0;
-  padding: 12px;
+  max-width: 1060px;
+  margin: 0 auto;
+  padding: 28px 20px 56px;
   background: var(--bg);
   color: var(--fg);
-  font: 13px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  font: 13.5px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 
-h2 {
+h1 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.lede {
+  margin: 4px 0 0;
+  color: var(--muted);
+}
+
+/* A row of cards, stretched to each other rather than each ending where its own content does: two
+   boxes of different heights side by side read as one being unfinished. */
+.row {
+  display: grid;
+  gap: 14px;
+  margin-top: 14px;
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 760px) {
+  .row.two { grid-template-columns: 1fr 1fr; }
+}
+
+/* What the cards under it are about, said once instead of in every card. */
+.band {
+  margin: 26px 0 0;
+}
+
+.band h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--fg);
+}
+
+.band p {
+  margin: 3px 0 0;
+  color: var(--muted);
+}
+
+footer {
+  margin-top: 24px;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.card h3 {
   margin: 0 0 8px;
   font-size: 11px;
   font-weight: 700;
@@ -38,31 +85,27 @@ h2 {
   color: var(--muted);
 }
 
-/* Subheadings inside Configuration, so Text and Image read as their own groups. */
-h3 {
-  margin: 14px 0 0;
-  padding-top: 8px;
-  border-top: 1px solid var(--line);
+/* Folded to its title, since it is the one card you stop needing. */
+details.card > summary {
+  cursor: pointer;
   font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--accent);
+  color: var(--muted);
 }
 
-h3 + label {
-  margin-top: 6px;
+details.card[open] > summary {
+  margin-bottom: 8px;
 }
 
 .steps {
   margin: 0;
-  line-height: 1.5;
+  padding-left: 18px;
 }
 
-#stat-last {
-  display: block;
-  text-align: left;
-  font-size: 12px;
+.steps li {
+  margin: 3px 0;
 }
 
 .hint {
@@ -85,21 +128,42 @@ kbd {
 }
 
 .card {
-  margin-top: 10px;
-  padding: 9px 10px;
+  padding: 12px 14px 14px;
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: 8px;
 }
 
-.row {
+/* A list rather than a grid, because "same as above" only means anything in one. Kept narrow so the
+   writing system and where it goes stay within a glance of each other on a wide screen. */
+.rows {
+  max-width: 470px;
+}
+
+.rows li {
+  gap: 8px;
+}
+
+.rows .provider-name {
+  flex: 1;
+  min-width: 0;
+}
+
+.rows select {
+  width: auto;
+  max-width: 190px;
+  flex: none;
+  padding: 2px 4px;
+}
+
+.row-line {
   display: flex;
   justify-content: space-between;
   gap: 8px;
   padding: 2px 0;
 }
 
-.row span {
+.row-line span {
   color: var(--muted);
   flex: none;
   white-space: nowrap;
@@ -107,7 +171,7 @@ kbd {
 
 /* One line, always: the label never shrinks and a long status is clipped rather than wrapped.
    The full text stays available as the title. */
-.row b {
+.row-line b {
   flex: 1;
   min-width: 0;
   font-size: 12px;
@@ -142,13 +206,18 @@ label:first-child {
 
 .split {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-  align-items: end;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 4px 16px;
+  align-items: start;
 }
 
-.split > div > label {
-  margin-top: 8px;
+/* One setting per line, each with its own note under it. */
+.stack > div + div {
+  margin-top: 10px;
+}
+
+.split > div > label:first-child {
+  margin-top: 0;
 }
 
 label.check {

@@ -1,4 +1,4 @@
-import { getSettings, setSettings, DEFAULTS, KEYS, SHARED } from "../lib/settings.js";
+import { getSettings, setSettings, DEFAULTS, KEYS, SHARED, targetForGroup } from "../lib/settings.js";
 
 const LANGUAGES = [
   ["en", "English"], ["zh", "Chinese"], ["zh-Hant", "Chinese (traditional)"], ["ja", "Japanese"],
@@ -41,33 +41,18 @@ const fillKeys = (select) => {
 };
 // The quick select carries a third kind of answer beside a key and off: riding the trigger's press.
 const quickChoice = (key, taps) => (key && key !== SHARED ? triggerValue(key, taps) : key);
-const keyOfChoice = (value) => value.split(":")[0];
 
 // Named by writing system rather than by language, because that is what a selection can be sorted by
 // without asking anyone: the popup should not promise a distinction the code cannot make.
-const QUICK_GROUPS = [
-  ["latin", "Latin (EN, FR, ES)"],
-  ["han", "Han (Chinese)"],
-  ["kana", "Japanese"],
-  ["hangul", "Korean"],
-  ["cyrillic", "Cyrillic (RU, UK)"],
-  ["arabic", "Arabic"],
-  ["other", "Everything else"],
-];
-
-// Neither key may answer to the other's, so each list greys out what the other one took. Greying out
-// rather than reassigning: the setting the user did not touch is not the extension's to change.
-// Only a key of its own can clash, and only with the trigger's: sharing that key is a choice of its
-// own here, and off clashes with nothing.
-function paintKeyChoices(triggerKey, quickKey) {
-  const taken = quickKey && quickKey !== SHARED ? quickKey : "";
-  for (const option of $("trigger").options) {
-    option.disabled = Boolean(taken) && keyOfChoice(option.value) === taken;
-  }
-  for (const option of $("quick").options) {
-    option.disabled = option.value !== SHARED && Boolean(option.value) && keyOfChoice(option.value) === triggerKey;
-  }
-}
+const QUICK_LABELS = {
+  latin: "Latin (EN, FR, ES)",
+  han: "Han (Chinese)",
+  kana: "Japanese",
+  hangul: "Korean",
+  cyrillic: "Cyrillic (RU, UK)",
+  arabic: "Arabic",
+  other: "Everything else",
+};
 
 // The list is the failover order: enabled ids first, in the user's order, disabled ones after.
 function renderProviders(order, onChange, listId = "providers", all = ALL_PROVIDERS) {
@@ -189,27 +174,62 @@ async function main() {
   $("quick").append(new Option("Off", ""));
   fillKeys($("quick"));
   $("quick").value = quickChoice(settings.quickKey, settings.quickTaps);
-  paintKeyChoices(settings.triggerKey, settings.quickKey);
 
-  let quickMap = settings.quickMap;
-  const rows = $("quick-rows");
-  for (const [group, label] of QUICK_GROUPS) {
-    const cell = document.createElement("div");
-    const name = document.createElement("label");
-    name.htmlFor = `quick-${group}`;
-    name.textContent = label;
-    const select = document.createElement("select");
-    select.id = `quick-${group}`;
-    select.append(new Option("Same as above", ""));
-    for (const [code, language] of LANGUAGES) select.append(new Option(`${language} (${code})`, code));
-    select.value = quickMap[group] || "";
-    select.addEventListener("change", () => {
-      quickMap = { ...quickMap, [group]: select.value };
-      setSettings({ quickMap });
-    });
-    cell.append(name, select);
-    rows.append(cell);
+  let quickOrder = settings.quickOrder;
+  const saveOrder = (next) => {
+    // The row that ends up on top has nothing above it to mean, so it keeps the language it was
+    // resolving to a moment ago rather than silently becoming the whole list's answer.
+    if (!next[0].lang) next[0].lang = targetForGroup(quickOrder, next[0].group, $("target").value);
+    quickOrder = next;
+    setSettings({ quickOrder });
+    renderQuickRows();
+  };
+
+  function renderQuickRows() {
+    const list = $("quick-rows");
+    list.replaceChildren();
+    for (const [index, row] of quickOrder.entries()) {
+      const item = document.createElement("li");
+
+      const name = document.createElement("span");
+      name.className = "provider-name";
+      name.textContent = QUICK_LABELS[row.group] || row.group;
+
+      const select = document.createElement("select");
+      // Only ever an answer for a row with something above it to point at.
+      if (index > 0) select.append(new Option("Same as above", ""));
+      for (const [code, language] of LANGUAGES) select.append(new Option(`${language} (${code})`, code));
+      select.value = row.lang || "";
+      select.addEventListener("change", () => {
+        quickOrder = quickOrder.map((r) => (r.group === row.group ? { ...r, lang: select.value } : r));
+        setSettings({ quickOrder });
+      });
+
+      const up = document.createElement("button");
+      up.textContent = "↑";
+      up.title = "Move up";
+      up.disabled = index === 0;
+      up.addEventListener("click", () => {
+        const next = quickOrder.map((r) => ({ ...r }));
+        [next[index - 1], next[index]] = [next[index], next[index - 1]];
+        saveOrder(next);
+      });
+
+      const down = document.createElement("button");
+      down.textContent = "↓";
+      down.title = "Move down";
+      down.disabled = index === quickOrder.length - 1;
+      down.addEventListener("click", () => {
+        const next = quickOrder.map((r) => ({ ...r }));
+        [next[index], next[index + 1]] = [next[index + 1], next[index]];
+        saveOrder(next);
+      });
+
+      item.append(name, select, up, down);
+      list.append(item);
+    }
   }
+  renderQuickRows();
 
   const showQuick = (value) => {
     $("quick-map").hidden = !value;
@@ -370,6 +390,7 @@ async function main() {
     button.disabled = false;
     button.textContent = "Test providers";
   });
+  $("version").textContent = `Version ${chrome.runtime.getManifest().version}`;
   $("minloading").value = settings.minLoadingMs;
   $("minloading-value").textContent = `${settings.minLoadingMs} ms`;
   $("toasts").value = settings.toastPosition;
@@ -384,13 +405,6 @@ async function main() {
     const [key, taps] = e.target.value.split(":");
     setSettings({ triggerKey: key, triggerTaps: Number(taps) });
     setKeyHint(triggerLabel(key, Number(taps)));
-    // The key it just took cannot also be quick translate's own, and the honest reading of a clash
-    // is that both meanings are on the one press.
-    if (keyOfChoice($("quick").value) === key) {
-      $("quick").value = SHARED;
-      setSettings({ quickKey: SHARED });
-    }
-    paintKeyChoices(key, keyOfChoice($("quick").value));
     showQuick($("quick").value);
   });
   $("quick").addEventListener("change", (e) => {
@@ -398,7 +412,6 @@ async function main() {
     const [key = "", taps] = value.split(":");
     setSettings(value === SHARED ? { quickKey: SHARED } : { quickKey: key, quickTaps: Number(taps) || 2 });
     showQuick(value);
-    paintKeyChoices(keyOfChoice($("trigger").value), key);
   });
   $("aim").addEventListener("change", (e) => setSettings({ aimOutline: e.target.value === "yes" }));
   $("minloading").addEventListener("input", (e) => {

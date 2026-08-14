@@ -201,7 +201,7 @@ for (const [mode, caption] of MODES) {
 console.log("  0-loading.png");
 
 // --- images ---------------------------------------------------------------
-// Off by default, so the capture turns it on the way the popup would. No host permission is needed
+// Off by default, so the capture turns it on the way the settings page would. No host permission is needed
 // here: the demo image is same-origin with the page, which the content script can fetch itself.
 // Where this scene starts, so it can be cut out again as a GIF of its own for the README.
 let imageStart = 0;

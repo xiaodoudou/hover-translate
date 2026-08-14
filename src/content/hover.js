@@ -2,10 +2,10 @@
 //
 // Two things a key can mean here. The trigger acts on the block under the pointer; quick translate
 // acts on the selection instead. By default they are the same key, and the pointer says which was
-// meant: over a selection a press takes that, anywhere else it takes the block. Quick translate can
-// be given a key of its own, which then always means the selection wherever it is; that key cannot
-// be the trigger's own, since a double tap contains a single one and whichever was the shorter would
-// swallow the other before it finished.
+// meant: over a selection, or in a field holding one, a press takes that, and anywhere else it takes
+// the block. The two counts can differ on that one key, since the press is handed to one counter or
+// the other before either of them counts it. Quick translate can also be given a key of its own,
+// which then means the selection wherever it is.
 //
 // Nothing happens until the key is released. While it is down the block under the pointer is only
 // outlined, so holding the key is how you aim and letting go is how you commit: the two cannot be
@@ -19,7 +19,7 @@
 // asks for it twice. Everything after that is identical, holding the second press included.
 import { SHARED } from "../lib/settings.js";
 
-export function installHover({ getConfig, onTrigger, onAim, onEscape, onQuick }) {
+export function installHover({ getConfig, onTrigger, onAim, onEscape, onQuick, quickReady }) {
   let hovered = null;
   let pointer = null;
   let queued = false;
@@ -112,33 +112,47 @@ export function installHover({ getConfig, onTrigger, onAim, onEscape, onQuick })
     onTrigger(target);
   };
 
-  const shares = () => getConfig().quickKey === SHARED;
+  // SHARED is the trigger's own key and its own count, so the two are told apart by what is under
+  // the pointer rather than by which key was pressed. Naming that key outright does the same, and
+  // then the counts may differ: one tap for the block, two for the selection, on the one modifier.
+  const quickKeyOf = () => {
+    const { quickKey, triggerKey } = getConfig();
+    return quickKey === SHARED ? triggerKey : quickKey || "";
+  };
+  const quickTapsOf = () => {
+    const { quickKey, quickTaps, triggerTaps } = getConfig();
+    return quickKey === SHARED ? triggerTaps : quickTaps;
+  };
+  const sharing = () => Boolean(quickKeyOf()) && quickKeyOf() === getConfig().triggerKey;
 
   const trigger = counter({
     keyOf: () => getConfig().triggerKey,
     tapsOf: () => getConfig().triggerTaps,
     onArm: showAim,
-    // Sharing the key, the selection is asked first: it is the more exact of the two instructions,
-    // and it answers only for a selection the pointer is actually on.
-    onCommit: () => {
-      if (shares() && inThisFrame() && onQuick?.(pointer)) return;
-      fire(hovered);
-    },
+    onCommit: () => fire(hovered),
     onDrop: () => onAim?.(null),
   });
 
-  // Silent whenever it would answer to the trigger's key: that press is already counted above, and
-  // counting it twice would fire both meanings at once.
   const quick = counter({
-    keyOf: () => {
-      const { quickKey, triggerKey } = getConfig();
-      return quickKey && quickKey !== SHARED && quickKey !== triggerKey ? quickKey : "";
-    },
-    tapsOf: () => getConfig().quickTaps,
-    onCommit: () => onQuick?.(),
+    keyOf: quickKeyOf,
+    tapsOf: quickTapsOf,
+    // On a key of its own there is no pointer in the question: pressing it could not have meant
+    // anything else, so the selection is taken wherever it is.
+    onCommit: () => onQuick?.(sharing() ? pointer : undefined),
   });
 
   const counters = [trigger, quick];
+
+  // A press on a key both answer to belongs to one of them. Which one is asked when the key goes
+  // down and kept until it comes up, so a pair is counted from start to finish by the same one: a
+  // selection where the pointer is means quick translate, and everything else means the block. That
+  // covers a field on its own, where the trigger never had anything to say.
+  let held = null;
+  const route = (event) => {
+    if (!sharing() || event.key !== getConfig().triggerKey) return null;
+    if (!held) held = quickReady?.(pointer) ? quick : trigger;
+    return held;
+  };
 
   document.addEventListener(
     "mousemove",
@@ -162,10 +176,21 @@ export function installHover({ getConfig, onTrigger, onAim, onEscape, onQuick })
       onEscape();
       return;
     }
+    const owner = route(event);
+    if (owner) {
+      owner.keyDown(event);
+      return;
+    }
     for (const press of counters) press.keyDown(event);
   };
 
   const onKeyUp = (event) => {
+    if (held && event.key === getConfig().triggerKey) {
+      const owner = held;
+      held = null;
+      owner.keyUp(event);
+      return;
+    }
     for (const press of counters) press.keyUp(event);
   };
 
@@ -174,6 +199,7 @@ export function installHover({ getConfig, onTrigger, onAim, onEscape, onQuick })
     for (const press of counters) press.abort();
   };
   const onForget = () => {
+    held = null;
     for (const press of counters) press.forget();
   };
 
