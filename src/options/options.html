@@ -1,0 +1,193 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Hover Translate settings</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <header>
+    <h1>Hover Translate</h1>
+    <p class="lede">Point at any text or image and tap a key, and it is translated where it stands.
+    Everything here takes effect straight away, on pages that are already open.</p>
+  </header>
+
+  <div class="row one">
+    <details class="card">
+      <summary>How to use</summary>
+      <ul class="steps">
+        <li>Point at text and tap <kbd id="key-hint">Ctrl</kbd>.</li>
+        <li>Point at an image and tap <kbd class="key-hint">Ctrl</kbd> to have it read too.</li>
+        <li id="quick-step">Select text and tap <kbd id="quick-hint">Ctrl</kbd> on it to replace just
+        that much.</li>
+        <li>Tap <kbd class="key-hint">Ctrl</kbd> again on anything translated to put the original
+        back, or <kbd>Esc</kbd> to restore the whole page at once.</li>
+      </ul>
+    </details>
+  </div>
+
+  <div class="row one">
+    <section class="card">
+      <h3>Last translation stats</h3>
+      <div class="row-line"><span>Text</span><b id="stat-text">Nothing yet</b></div>
+      <div class="row-line"><span>Image</span><b id="stat-image">Nothing yet</b></div>
+    </section>
+  </div>
+
+  <div class="band">
+    <h2>Translating an element</h2>
+    <p>Point at a paragraph, a heading, a menu row or an image and tap the key: the block under the
+    pointer is translated in place, and tapping it again puts the original back.</p>
+  </div>
+
+  <div class="row one">
+    <section class="card">
+      <h3>Trigger</h3>
+      <div class="stack">
+        <div>
+          <label for="trigger">Trigger key</label>
+          <select id="trigger"></select>
+          <p class="hint italic">Tapping twice is harder to trigger by accident. Alt is not offered:
+          the browser answers a bare Alt by focusing its own toolbar, taking the key with it.</p>
+        </div>
+        <div>
+          <label for="aim">Outline what would be translated</label>
+          <select id="aim">
+            <option value="no">No</option>
+            <option value="yes">Yes</option>
+          </select>
+          <p class="hint italic">While the key is held, outlines the block that releasing it would
+          translate, so you can move off the wrong one before you let go. The outline is painted
+          outside the box and moves no text.</p>
+        </div>
+        <div>
+          <label for="minloading">Show loading for at least <output id="minloading-value"></output></label>
+          <input type="range" id="minloading" min="0" max="2000" step="100">
+          <p class="hint italic">This setting does not impact translation time. It only holds the
+          loading gradient on screen long enough to be seen.</p>
+        </div>
+        <div>
+          <label for="target">Translate to</label>
+          <select id="target"></select>
+          <p class="hint italic">Where a block goes. A selection follows the list below instead,
+          which starts from this same language.</p>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div class="row two">
+    <section class="card">
+      <h3>Text</h3>
+
+      <label for="mode">Show</label>
+      <select id="mode">
+        <option value="replace">Replace the text</option>
+        <option value="outlined">Replace, outlined</option>
+        <option value="underlined">Replace, underlined</option>
+        <option value="dashed">Replace, dashed underline</option>
+        <option value="both">Both, original then translation</option>
+        <option value="bubble">A bubble, leaving the page alone</option>
+      </select>
+
+      <label for="clipped">Scroll clipped lines</label>
+      <select id="clipped">
+        <option value="fit">Enable (default)</option>
+        <option value="grow">Disable</option>
+      </select>
+      <p class="hint italic">A translation is longer than the line a page cut to one width. Enabled,
+      the line scrolls while you point at it, unless the page left room around the box, which it
+      takes instead; a menu row is built around its one line and has none, so it scrolls. Disabled
+      always grows the box.</p>
+
+      <label>Provider</label>
+      <ul id="providers" class="providers"></ul>
+      <div class="inline end">
+        <button id="test" class="small">Test providers</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h3>Image</h3>
+
+      <label for="image-on">Translate images</label>
+      <select id="image-on">
+        <option value="yes">Yes</option>
+        <option value="no">No</option>
+      </select>
+      <p class="hint italic">Off until asked for: reading an image the page did not serve itself
+      needs a permission the extension does not install with, which is requested here.</p>
+
+      <div id="image-settings">
+        <label>Provider order</label>
+        <ul id="ocr-providers" class="providers"></ul>
+        <div class="inline end">
+          <button id="grant" class="small">Allow reading images</button>
+          <button id="test-image" class="small">Test providers</button>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div class="band">
+    <h2>Translating a selection</h2>
+    <p>Select any text and tap the key on it, and only those words are replaced. Text selected in a
+    search box, a comment field or any other input is replaced there too, which is how a message goes
+    out in a language you do not write.</p>
+  </div>
+
+  <div class="row two">
+    <section class="card" id="quick-map">
+      <h3>Where a selection goes</h3>
+      <p class="hint">By the writing system it is in, read top to bottom. Same as above means the row
+      above, so scripts that share a destination can be stacked under the one that names it; the top
+      row has nothing above it and always names a language.</p>
+      <ul class="providers rows" id="quick-rows"></ul>
+      <p class="hint italic">Script is all a short selection can be sorted by for free: it tells
+      Chinese from Russian from English, but not French from English, nor Mandarin from Cantonese.</p>
+    </section>
+
+    <section class="card">
+      <h3>Trigger</h3>
+      <label for="quick">Translate the selection</label>
+      <select id="quick"></select>
+      <p class="hint italic">The trigger key is the default, and may also be chosen outright. A press
+      on a key both use goes to whichever has something to act on: a selection where you are
+      pointing, or in the field you are over, takes it, and everything else takes the block. So the
+      counts can differ on one modifier, one tap for the block and two for the selection.</p>
+      <p class="hint italic">In the page it is a view like any other translation, and tapping the key
+      on it again puts the original back. The selection is replaced as plain text, so links and bold
+      inside it do not survive. In a field it is an edit rather than a view: nothing marks it,
+      nothing offers to undo it, and the field's own undo is the way back.</p>
+    </section>
+  </div>
+
+  <div class="band">
+    <h2>Other</h2>
+  </div>
+
+  <div class="row one">
+    <section class="card">
+      <h3>Notices</h3>
+      <label for="toasts">Show notices</label>
+      <select id="toasts">
+        <option value="top-left">Top left</option>
+        <option value="top-center">Top center</option>
+        <option value="top-right">Top right</option>
+        <option value="bottom-left">Bottom left</option>
+        <option value="bottom-center">Bottom center</option>
+        <option value="bottom-right">Bottom right</option>
+        <option value="off">Disabled</option>
+      </select>
+      <p class="hint italic">Where a message appears when a block is already in your language, or
+      when a provider fails.</p>
+    </section>
+  </div>
+
+  <footer>
+    <span id="version"></span>
+  </footer>
+
+  <script type="module" src="options.js"></script>
+</body>
+</html>

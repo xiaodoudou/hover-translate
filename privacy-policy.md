@@ -26,7 +26,7 @@ The text is sent to whichever of these you have enabled, in your chosen order:
 Once the text reaches a provider it is subject to that provider's own policy, which is linked above.
 Note that MyMemory is a shared translation memory: text sent to it may be retained and reused in
 their public corpus. It is last in the default order for that reason. You can remove any provider
-from the list in the extension's popup.
+from the list on the extension's settings page.
 
 ## What is stored
 

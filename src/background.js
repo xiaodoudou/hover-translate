@@ -508,6 +508,13 @@ async function handleTranslate({ texts, targetLang, order, sample = "" }) {
   return { texts: translated, engine: provider, sourceLang, ms };
 }
 
+// There is nothing on the toolbar to click and nothing to see until a page is open, so a fresh
+// install shows its own settings rather than waiting to be found under Details in chrome://extensions.
+// Only on install: doing it on every update would take over a tab for news nobody asked for.
+chrome.runtime.onInstalled?.addListener(({ reason }) => {
+  if (reason === "install") chrome.runtime.openOptionsPage();
+});
+
 const HANDLERS = { translate: handleTranslate, ocr: handleOcr };
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {

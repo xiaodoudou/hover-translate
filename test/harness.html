@@ -41,6 +41,7 @@ import { markOverflow, clearOverflow, setClippedLines } from "../src/content/mar
 import { hasScriptForeignTo, pickLanguage, languageFromScript, scriptGroup } from "../src/lib/script.js";
 import { installHover } from "../src/content/hover.js";
 import { takeSelection, selectionAt } from "../src/content/selection.js";
+import { targetForGroup, usableOrder } from "../src/lib/settings.js";
 
 const out = [];
 let failures = 0;
@@ -800,44 +801,60 @@ press("keyup", "Shift");
 tapQuick();
 check("typing a capital is not one half of a pair", quickFired.length === 0, `fired ${quickFired.length}`);
 
+// A key of its own is only its own: the trigger's key is not it, whatever is selected.
 quickFired.length = 0;
 tap();
 tap();
-check("the trigger's own key never means quick translate", quickFired.length === 0, `fired ${quickFired.length}`);
+check("the trigger's key means nothing to a quick key of its own",
+  quickFired.length === 0, `fired ${quickFired.length}`);
 
-// One of the two would have to win every press, and the loser would be the one the user meant.
-quickConfig.quickKey = "Control";
-quickFired.length = 0;
-tap();
-tap();
-check("a quick key set to the trigger's key is off", quickFired.length === 0, `fired ${quickFired.length}`);
-
-// --- one key for both, the pointer saying which ---------------------------
-// The default. A press asks the selection first and falls through to the block when the answer is
-// no, so the two meanings never both happen and never both refuse.
+// --- one key for both, what is under the pointer saying which -------------
+// The default, and what naming the trigger's own key does too. A press is handed to one of the two
+// before either counts it, so they never both happen and never both refuse.
 const sharedConfig = { triggerKey: "Control", triggerTaps: 1, doubleTapMs: 400, quickKey: "trigger", quickTaps: 2 };
 const sharedBlocks = [];
 const sharedAsked = [];
-let selectionAnswers = false;
+let selectionThere = false;
 installHover({
   getConfig: () => sharedConfig,
   onTrigger: (target) => sharedBlocks.push(target),
-  onQuick: (at) => { sharedAsked.push(at); return selectionAnswers; },
+  onQuick: (at) => { sharedAsked.push(at); return true; },
+  quickReady: () => selectionThere,
   onEscape: () => {},
 });
 
 move();
 tap();
-check("the selection is asked first, and told where the pointer is",
-  sharedAsked.length === 1 && typeof sharedAsked[0]?.x === "number", JSON.stringify(sharedAsked[0]));
-check("and with no selection there the press takes the block", sharedBlocks.length === 1, `took ${sharedBlocks.length}`);
+check("with nothing selected where the pointer is, a press takes the block",
+  sharedBlocks.length === 1 && sharedAsked.length === 0, `${sharedBlocks.length} blocks, ${sharedAsked.length} quick`);
 
-selectionAnswers = true;
+selectionThere = true;
 sharedBlocks.length = 0;
 tap();
-check("a press the selection answered does not also take the block",
+check("with a selection there it takes that instead",
+  sharedAsked.length === 1 && sharedBlocks.length === 0, `${sharedBlocks.length} blocks, ${sharedAsked.length} quick`);
+check("and it is told where the pointer is, so it takes the one meant",
+  typeof sharedAsked[0]?.x === "number", JSON.stringify(sharedAsked[0]));
+
+// The same key with different counts, which only works because the press is handed over before it is
+// counted: one tap is the block's, two are the selection's, and neither ever sees the other's press.
+sharedConfig.quickKey = "Control";
+sharedConfig.quickTaps = 2;
+sharedAsked.length = 0;
+sharedBlocks.length = 0;
+tap();
+check("naming the same key, one tap over a selection does not fire the block",
   sharedBlocks.length === 0, `took ${sharedBlocks.length}`);
-selectionAnswers = false;
+check("nor the selection, which was told to wait for the second",
+  sharedAsked.length === 0, `fired ${sharedAsked.length}`);
+tap();
+check("and the second tap takes the selection", sharedAsked.length === 1, `fired ${sharedAsked.length}`);
+
+selectionThere = false;
+sharedAsked.length = 0;
+tap();
+check("while off the selection the one tap is still the block's",
+  sharedBlocks.length === 1 && sharedAsked.length === 0, `${sharedBlocks.length} blocks, ${sharedAsked.length} quick`);
 
 // --- what a selection hands over ------------------------------------------
 // A field is not in the DOM the way the page's own text is: no selection API reports what is
@@ -879,6 +896,28 @@ const range = document.createRange();
 range.selectNodeContents(words);
 getSelection().removeAllRanges();
 getSelection().addRange(range);
+// --- where a selection goes, read down the list ---------------------------
+const order = [
+  { group: "latin", lang: "en" },
+  { group: "han", lang: "" },
+  { group: "kana", lang: "fr" },
+  { group: "hangul", lang: "" },
+];
+check("a row that names a language answers with it", targetForGroup(order, "latin", "xx") === "en");
+check("one that names none takes the row above it", targetForGroup(order, "han", "xx") === "en");
+check("and keeps taking the nearest one named above", targetForGroup(order, "hangul", "xx") === "fr",
+  targetForGroup(order, "hangul", "xx"));
+check("a script with no row at all falls back", targetForGroup(order, "arabic", "xx") === "xx");
+
+const filled = usableOrder([{ group: "han", lang: "" }], null, "de");
+check("a stored list keeps its order and gains the rows it is missing",
+  filled[0].group === "han" && filled.length === 7, JSON.stringify(filled.map((r) => r.group)));
+check("and the top row is never left inheriting from nothing", filled[0].lang === "de", filled[0].lang);
+const migrated = usableOrder(undefined, { han: "fr", latin: "" }, "en");
+check("the map 1.4.0 stored arrives as a list of the same rows",
+  migrated.find((r) => r.group === "han").lang === "fr" && migrated[0].group === "latin" &&
+    migrated[0].lang === "en", JSON.stringify(migrated));
+
 // Sharing the trigger's key, a press means the selection only where the selection is: asked with a
 // pointer, this is the question "is that what you are pointing at", not "is anything selected".
 const spot = words.getBoundingClientRect();

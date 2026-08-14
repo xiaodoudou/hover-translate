@@ -41,10 +41,19 @@ export const DEFAULTS = {
   quickKey: SHARED, // SHARED, one of KEYS, or "" for off
   // Only when it has a key of its own. Riding the trigger, it is counted however the trigger is.
   quickTaps: 2,
-  // Where a selection goes, keyed by the writing system it is in. Empty means the target language
-  // above, so only the direction that differs from it needs setting, which is usually your own
-  // language going back out. A script with no row of its own lands in "other".
-  quickMap: { latin: "", han: "", kana: "", hangul: "", cyrillic: "", arabic: "", other: "" },
+  // Where a selection goes, by the writing system it is in, read top to bottom: an empty language
+  // means the row above it, so scripts that share a destination can be stacked under the one that
+  // names it. The first row has nothing above it and always names a language. A script with no row
+  // of its own lands in "other", which is why that one cannot be removed or renamed away.
+  quickOrder: [
+    { group: "latin", lang: "en" },
+    { group: "han", lang: "" },
+    { group: "kana", lang: "" },
+    { group: "hangul", lang: "" },
+    { group: "cyrillic", lang: "" },
+    { group: "arabic", lang: "" },
+    { group: "other", lang: "" },
+  ],
   // Off until asked for: reading images needs a host permission the extension does not install
   // with, so this is turned on from the popup, where that permission can be requested.
   translateImages: false,
@@ -64,12 +73,11 @@ export const DEFAULTS = {
 // once instead of on the next visit to the settings.
 const usableKey = (key, fallback) => (KEYS.includes(key) ? key : fallback);
 
-// A quick key the trigger is already using is the same press either way, which is what SHARED says
-// outright, so it is read as that rather than refused.
-function quickFrom(key, triggerKey) {
+// The trigger's own key is a legal answer here: a press on a key both want is handed to whichever of
+// them has something to act on, so the two never race for it.
+function quickFrom(key) {
   if (!key) return "";
-  if (key === SHARED || key === triggerKey) return SHARED;
-  return usableKey(key, "");
+  return key === SHARED ? SHARED : usableKey(key, "");
 }
 
 export async function getSettings() {
@@ -78,12 +86,48 @@ export async function getSettings() {
   return {
     ...DEFAULTS,
     ...stored,
-    // The map is stored whole, so one saved before a script had a row of its own would arrive
-    // without it and read as undefined rather than as "not set".
-    quickMap: { ...DEFAULTS.quickMap, ...stored.quickMap },
+    quickOrder: usableOrder(stored.quickOrder, stored.quickMap, stored.targetLang || DEFAULTS.targetLang),
     triggerKey,
-    quickKey: quickFrom(stored.quickKey, triggerKey),
+    quickKey: quickFrom(stored.quickKey),
   };
+}
+
+// Every writing system exactly once, in whatever order was stored, with anything missing added in
+// the order it is declared above. A stored list is otherwise trusted: it is the user's own ordering.
+// `map` is what 1.4.0 stored instead, an unordered object, which reads as the declared order.
+export function usableOrder(order, map, targetLang) {
+  const known = new Map(DEFAULTS.quickOrder.map((row) => [row.group, ""]));
+  for (const { group, lang } of Array.isArray(order) ? order : []) {
+    if (known.has(group)) known.set(group, typeof lang === "string" ? lang : "");
+  }
+  if (!Array.isArray(order) && map && typeof map === "object") {
+    for (const [group, lang] of Object.entries(map)) if (known.has(group)) known.set(group, lang || "");
+  }
+  const seen = new Set();
+  const rows = [];
+  for (const { group } of Array.isArray(order) ? order : []) {
+    if (known.has(group) && !seen.has(group)) {
+      seen.add(group);
+      rows.push({ group, lang: known.get(group) });
+    }
+  }
+  for (const [group, lang] of known) if (!seen.has(group)) rows.push({ group, lang });
+  // Nothing above the first row to inherit from, so it says where it goes or the target does for it.
+  if (!rows[0].lang) rows[0].lang = targetLang;
+  return rows;
+}
+
+// Reading the list the way it is written: down from the top, each row without a language of its own
+// taking the last one named above it.
+export function targetForGroup(order, group, fallback) {
+  let lang = fallback;
+  for (const row of order || []) {
+    if (row.lang) lang = row.lang;
+    if (row.group === group) return lang;
+  }
+  // A list with no row for it at all is one this version does not recognise, and inheriting from
+  // whatever happened to be last in it would be an answer made up out of nothing.
+  return fallback;
 }
 
 export async function setSettings(patch) {

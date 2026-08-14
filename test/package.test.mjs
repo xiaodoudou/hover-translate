@@ -21,7 +21,7 @@ console.log("manifest paths exist");
 const referenced = [
   manifest.background.service_worker,
   ...manifest.content_scripts.flatMap((cs) => [...(cs.js || []), ...(cs.css || [])]),
-  manifest.action.default_popup,
+  manifest.options_ui.page,
   ...Object.values(manifest.icons),
 ];
 for (const path of referenced) {
@@ -31,6 +31,14 @@ for (const path of referenced) {
 console.log("\nmanifest shape");
 check("manifest_version is 3", manifest.manifest_version === 3);
 check("service worker is a module", manifest.background.type === "module");
+// The settings are a page reached from the extensions panel, so there is no toolbar button at all:
+// nothing to click, nothing to pin, and nothing sitting in the toolbar for a keyboard shortcut.
+check("the settings open in a tab", manifest.options_ui?.open_in_tab === true);
+check("and nothing is added to the toolbar", !manifest.action, JSON.stringify(manifest.action));
+// Which leaves nothing to click, so the one moment it can introduce itself is the install.
+const worker = readFileSync(resolve(root, manifest.background.service_worker), "utf8");
+check("so a fresh install opens the settings itself",
+  /onInstalled[\s\S]{0,220}openOptionsPage/.test(worker));
 check("storage permission present", manifest.permissions.includes("storage"));
 check("no permission beyond storage", manifest.permissions.length === 1,
   JSON.stringify(manifest.permissions));
@@ -68,7 +76,7 @@ function walk(entry, seen = new Set()) {
 }
 
 console.log("\nmodule graph resolves");
-const entries = ["src/background.js", "src/content/loader.js", "src/popup/popup.js", "src/content/index.js"];
+const entries = ["src/background.js", "src/content/loader.js", "src/options/options.js", "src/content/index.js"];
 const reached = new Set();
 for (const entry of entries) for (const file of walk(entry)) reached.add(file);
 for (const file of reached) {
@@ -84,7 +92,7 @@ const contentGraph = [...walk("src/content/index.js")].map((f) => posix(relative
 for (const path of contentGraph) {
   check(path, matches(path), "not covered by web_accessible_resources");
 }
-check("popup-only modules are not needlessly exposed", !matches("src/popup/popup.js"));
+check("settings-only modules are not needlessly exposed", !matches("src/options/options.js"));
 
 console.log("\ncontent script safety");
 const contentSources = contentGraph.map((p) => readFileSync(resolve(root, p), "utf8")).join("\n");

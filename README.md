@@ -16,8 +16,8 @@ No account, no API key, no paid service. Three free providers, tried in the orde
 | **Google** | Batches natively, fastest, widest language coverage |
 | **MyMemory** | Last resort: needs to be told the source language and caps each request at 500 characters |
 
-If one fails the next is tried, so a single outage is not a dead extension. The popup shows which
-provider served the last block and how long it took, text and images counted separately.
+If one fails the next is tried, so a single outage is not a dead extension. The settings page shows
+which provider served the last block and how long it took, text and images counted separately.
 
 ## Images
 
@@ -29,9 +29,9 @@ its original `src` and nothing is inserted beside it.
 ![A Chinese product banner being read and translated in place](docs/demo-image.gif)
 
 This is **off until you turn it on**, because reading an image the page did not serve itself is a
-cross-origin fetch that needs a host permission. Setting **Translate images** to *Yes* in the popup
-asks for that permission there and then; declining leaves the feature off rather than switching it on
-into something that cannot work. Setting it back to *No* hands the permission back.
+cross-origin fetch that needs a host permission. Setting **Translate images** to *Yes* on the
+settings page asks for that permission there and then; declining leaves the feature off rather than
+switching it on into something that cannot work. Setting it back to *No* hands the permission back.
 
 | Recogniser | Notes |
 | --- | --- |
@@ -48,7 +48,9 @@ the failover moves on to Lens.
 
 1. Open `chrome://extensions` and turn on **Developer mode**.
 2. **Load unpacked**, and pick this folder.
-3. Open the popup to choose your target language, display mode and provider order.
+3. Open its settings from **Details** on that page, then **Extension options**, and choose your
+   target language, display mode and provider order. There is no toolbar button: the extension is
+   worked entirely from the keyboard, so it takes no room in the toolbar.
 
 ## Use
 
@@ -66,10 +68,10 @@ commit; a press you think better of costs nothing. Shortcuts are unaffected: pre
 any second key, clicking or scrolling while the trigger key is down cancels the press, so
 <kbd>Ctrl</kbd>+C, <kbd>Ctrl</kbd>+click and <kbd>Ctrl</kbd>+scroll all behave normally.
 
-"Outline what would be translated" in the popup shows you what you are aiming at while the key is
-down. It is off by default, since the key is held for a moment before every translation and most of
-the time you already know what you are pointing at; turn it on while you are learning what a tap
-takes. It is the same block the trigger itself resolves, not a guess at it, so no outline means
+"Outline what would be translated" on the settings page shows you what you are aiming at while the
+key is down. It is off by default, since the key is held for a moment before every translation and
+most of the time you already know what you are pointing at; turn it on while you are learning what a
+tap takes. It is the same block the trigger itself resolves, not a guess at it, so no outline means
 nothing would happen there. It is an outline rather than a border because an outline is painted
 outside the box and takes no space at all: the element keeps its size, nothing reflows, and no word
 moves under the pointer while you are aiming at it. On a double-tap trigger only the second press
@@ -79,15 +81,19 @@ outlines anything, since the first one does nothing.
 
 The trigger takes whole blocks, which is right for a paragraph and useless for half of one. Quick
 translate takes the selection instead: select any text, tap <kbd>Ctrl</kbd> on it, and those words are
-replaced where they sit. In the page that is a view like any other translation, so <kbd>Esc</kbd>
-puts it back, and so does the trigger key tapped on it.
+replaced where they sit. In the page that is a view like any other translation, and tapping the key
+on it again puts the original back.
 
-It is the trigger's own key by default, and the pointer is what tells the two meanings apart. A press
-over the selection takes the selection; a press anywhere else takes the block under the pointer, as
-it always did. A selection left behind somewhere else on the page is not what a press means, because
-what you are pointing at is. Quick translate can be given a key of its own instead, and that key then
-means the selection wherever it is; it cannot be the trigger's own, since a double tap contains a
-single one and whichever was the shorter would swallow the other.
+It is the trigger's own key by default, and what is under the pointer tells the two meanings apart. A
+press on a key both use goes to whichever of them has something to act on: a selection where you are
+pointing, or one in the field you are over, takes it, and everything else takes the block under the
+pointer exactly as before. A selection left behind somewhere else on the page is not what a press
+means, because what you are pointing at is.
+
+The press is handed over before either side counts it, so the two can also differ in taps on the one
+modifier: <kbd>Ctrl</kbd> once for the block and <kbd>Ctrl</kbd> twice for the selection is a legal
+pair, and neither ever sees the other's press. Quick translate can equally be given a key of its own,
+which then means the selection wherever it is, pointer or no pointer.
 
 Text selected inside an input or a textarea is replaced there too, which is how you send a message
 out in a language you do not write: type it in your own, select it, tap. A field holds no nodes to
@@ -110,15 +116,18 @@ hears the beginning of and never the end.
 Where a selection goes is read off the writing system it is in rather than from a language detector,
 which costs nothing and cannot be wrong about what it does answer:
 
-| The selection is written in | Where it goes |
+| Row | Covers |
 | --- | --- |
-| Latin: English, French, Spanish, German | its own row |
+| Latin | English, French, Spanish, German and everything else written in it |
 | Han, Japanese, Korean, Cyrillic, Arabic | one row each |
-| anything else | the last row |
+| Everything else | any script with no row of its own |
 
-Every row starts empty, meaning the target language at the top of the popup, so only the direction
-that differs from it needs setting. Reading Chinese pages with English as your target needs no rows
-at all; sending English back out to Chinese is one row.
+The list is read top to bottom, and it can be reordered. **Same as above** means the row above it, so
+scripts that share a destination stack under the one that names it. Latin on top going to Chinese,
+then Han set to English with everything below it saying Same as above, is the whole of "what I write
+goes out in Chinese, and everything I read comes back in English". The top row has nothing above it,
+so it always names a language, and moving a row up to the top settles it on whatever it was
+inheriting rather than leaving it pointing at nothing.
 
 A script tells Chinese from Russian from English for free. It stops where an alphabet is shared:
 French and English are one row, and so are Mandarin and Cantonese, because nothing in the characters
@@ -152,7 +161,7 @@ needed, so the second line exists, is laid out, and is painted nowhere, which is
 does to a title. Neither cut is necessarily on the element holding the words, since a card sizes the
 row rather than the title inside it, so the boxes above the text are checked too.
 
-There are only two honest answers, and **Scroll clipped lines** in the popup picks between them.
+There are only two honest answers, and **Scroll clipped lines** on the settings page picks between them.
 
 | Setting | What happens to text that no longer fits |
 | --- | --- |
@@ -257,7 +266,7 @@ python -m http.server 8731
 ## Limits
 
 - These are undocumented endpoints. They can rate-limit or change without notice, which is exactly why
-  there are three of them and why failures surface in the popup rather than passing silently.
+  there are three of them and why failures surface on the settings page rather than passing silently.
 - The Lens recogniser is the least documented of the lot: its request shape was derived from the
   server's own error messages rather than a spec, so it is the first thing that will break if Google
   renumbers those fields. The failover means that degrades to Yandex rather than to nothing.

@@ -17,7 +17,7 @@ import { showBubble, hideBubble } from "./bubble.js";
 import { setClippedLines } from "./marquee.js";
 import * as render from "./render.js";
 import { translateTexts } from "../engine/index.js";
-import { getSettings, onSettingsChanged, DEFAULTS, SHARED } from "../lib/settings.js";
+import { getSettings, onSettingsChanged, DEFAULTS, SHARED, targetForGroup } from "../lib/settings.js";
 
 const settings = { ...DEFAULTS, ...(await getSettings().catch(() => ({}))) };
 render.setMarker(settings.displayMode);
@@ -190,8 +190,7 @@ function handleSelection(at) {
 // the one setting, so the same key sends Chinese out to English and English back to Chinese.
 async function translateSelection(taken) {
   const { element, text, group } = taken;
-  const map = settings.quickMap || {};
-  const targetLang = map[group] || map.other || settings.targetLang;
+  const targetLang = targetForGroup(settings.quickOrder, group, settings.targetLang);
 
   render.markPending(element);
   const startedAt = Date.now();
@@ -354,12 +353,10 @@ installHover({
   // be translated rather than a guess at it. Nothing resolved means nothing would happen, and
   // showing no outline says exactly that. Called with the setting off too, so an outline drawn
   // before it was turned off still gets cleared.
-  onAim: (target, at) => {
-    // Sharing the key, a selection under the pointer is what a release would take, so outlining the
-    // block would be pointing at the wrong thing.
-    const quick = settings.quickKey === SHARED && at && selectionAt(at);
-    render.aim(settings.aimOutline && target && !quick ? resolveBlock(target) : null);
-  },
+  onAim: (target) => render.aim(settings.aimOutline && target ? resolveBlock(target) : null),
+  // Asked as the key goes down, to decide which of the two that press is. A selection the pointer is
+  // on, or one in the field it is over, is the more exact of the two instructions and takes it.
+  quickReady: (at) => Boolean(selectionAt(at)),
   onQuick: handleSelection,
   onEscape: () => {
     render.clearAim();

@@ -18,8 +18,11 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 // EXT_PATH points the install at an unpacked copy of the shipping ZIP, so the same assertions can
 // be run against the artifact that actually goes to the store rather than the source tree.
 const extPath = process.env.EXT_PATH ? resolve(process.env.EXT_PATH) : root;
-const PORT = 8741;
-const CDP_PORT = 9444;
+// Fixed so two runs collide loudly rather than interleave, and overridable because Windows reserves
+// port ranges for Hyper-V that move about: a blocked one makes Chrome start with no debug port and
+// the whole run time out on nothing.
+const PORT = Number(process.env.PORT || 8741);
+const CDP_PORT = Number(process.env.CDP_PORT || 9444);
 
 let failures = 0;
 const check = (name, ok, detail = "") => {
@@ -126,6 +129,9 @@ try {
   await page.send("Page.enable");
   await page.send("Page.reload");
   await sleep(2500);
+  // Installing opens the settings in a tab of its own, which leaves the fixture in the background,
+  // where Chrome stops running animation frames: the marquee then never moves and reads as broken.
+  await page.send("Page.bringToFront");
 
   // The fixture frames a chat, so the extension has a world per frame. Everything below addresses
   // the top document, which has to be picked by frame id rather than by taking the last one.
@@ -774,7 +780,10 @@ try {
 
   // A key of its own takes the selection wherever it is, since nothing else could have been meant by
   // pressing it. This one is deliberately pointed away from the text it acts on.
-  await ev(`chrome.storage.sync.set({quickKey: 'Shift', quickMap: {latin: 'zh'}})`);
+  const ORDER = (latin, han) => `[{group:'latin',lang:'${latin}'},{group:'han',lang:'${han}'},` +
+    `{group:'kana',lang:''},{group:'hangul',lang:''},{group:'cyrillic',lang:''},` +
+    `{group:'arabic',lang:''},{group:'other',lang:''}]`;
+  await ev(`chrome.storage.sync.set({quickKey: 'Shift', quickOrder: ${ORDER("zh", "en")}})`);
   await sleep(300);
   await select("quick-latin", 0, 28, false);
   await tapQuick();
@@ -791,7 +800,7 @@ try {
   // A field holds no nodes to wrap and nothing the page's selection API reports, so this is the
   // other half of the feature and not a variation on the first: characters in a value. It is also
   // the half that is an edit rather than a view, and the checks below are what that means.
-  await ev(`chrome.storage.sync.set({quickKey: 'trigger', quickMap: {}})`);
+  await ev(`chrome.storage.sync.set({quickKey: 'trigger', quickOrder: ${ORDER("en", "")}})`);
   await sleep(300);
   const fieldAt = await ev(`(() => { const el = document.getElementById('quick-field');
     el.scrollIntoView({block:'center'}); el.focus(); el.setSelectionRange(0, 8);
@@ -1156,6 +1165,77 @@ try {
   await ctrlTap(SEL.fr, 3000);
   check("it says it once and then stays quiet", (await ev(`window.__notices`)) === 1,
     `${await ev(`window.__notices`)} notices`);
+
+  // The settings are a page of their own now, and it is the only UI there is. It gets a tab of its
+  // own here, since it runs in an extension context rather than in any page's world.
+  console.log("\nthe settings page is a page, and it writes what it shows");
+  const optionsTab = await (await fetch(
+    `http://127.0.0.1:${CDP_PORT}/json/new?chrome-extension://${EXT_ID}/src/options/options.html`,
+    { method: "PUT" },
+  )).json();
+  const options = attach(optionsTab.webSocketDebuggerUrl);
+  await options.ready;
+  await options.send("Runtime.enable");
+  await sleep(1500);
+  const onPage = async (expression) => {
+    const r = await options.send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
+    if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || r.exceptionDetails.text);
+    return r.result.value;
+  };
+
+  const drawn = await onPage(`(() => ({
+    target: document.getElementById('target').options.length,
+    providers: document.querySelectorAll('#providers li').length,
+    rows: document.querySelectorAll('#quick-rows select').length,
+    quick: document.getElementById('quick').selectedOptions[0]?.value,
+    version: document.getElementById('version').textContent,
+    wide: document.querySelectorAll('.row.two').length >= 2,
+  }))()`);
+  console.log("   ", JSON.stringify(drawn));
+  check("it draws itself from the settings", drawn.target > 20 && drawn.providers === 3 && drawn.rows === 7,
+    JSON.stringify(drawn));
+  check("with quick translate on the trigger key by default", drawn.quick === "trigger", drawn.quick);
+  check("and says which version is installed", /^Version \d+\.\d+\.\d+$/.test(drawn.version), drawn.version);
+
+  // The list is read top to bottom, so the row that ends up on top cannot be the one saying "the row
+  // above". Moving one up has to settle what it was inheriting rather than leave it pointing at air.
+  const inherited = await onPage(`(() => {
+    const rows = [...document.querySelectorAll('#quick-rows li')];
+    return { top: rows[0].querySelector('select').selectedOptions[0].textContent,
+             topHasInherit: [...rows[0].querySelectorAll('option')].some((o) => o.value === ''),
+             second: rows[1].querySelector('select').selectedOptions[0].textContent,
+             upDisabled: rows[0].querySelector('button').disabled }; })()`);
+  console.log("   ", JSON.stringify(inherited));
+  check("the top row names a language and cannot say Same as above",
+    inherited.top === "English (en)" && inherited.topHasInherit === false, JSON.stringify(inherited));
+  check("the rows below it can, and start that way", inherited.second === "Same as above");
+  check("and the top row has nowhere to move up to", inherited.upDisabled === true);
+
+  await onPage(`document.querySelectorAll('#quick-rows li')[1].querySelectorAll('button')[0].click()`);
+  await sleep(400);
+  const moved = await onPage(`(async () => {
+    const stored = (await chrome.storage.sync.get('quickOrder')).quickOrder;
+    return { first: stored[0], second: stored[1],
+             shown: document.querySelector('#quick-rows li select').selectedOptions[0].textContent }; })()`);
+  console.log("   ", JSON.stringify(moved));
+  check("moving a row to the top keeps the language it was inheriting",
+    moved.first.group === "han" && moved.first.lang === "en", JSON.stringify(moved.first));
+  check("and the row it displaced keeps its own", moved.second.group === "latin" && moved.second.lang === "en",
+    JSON.stringify(moved.second));
+  check("with the page redrawn to match", moved.shown === "English (en)", moved.shown);
+  await onPage(`document.querySelectorAll('#quick-rows li')[1].querySelectorAll('button')[0].click()`);
+  await sleep(300);
+
+  // The point of the page: a control changed here is stored, which is the whole of how it reaches a
+  // tab that is already open, since the content script listens for exactly that.
+  await onPage(`(() => { const el = document.getElementById('toasts');
+    el.value = 'top-right'; el.dispatchEvent(new Event('change')); })()`);
+  await sleep(400);
+  check("changing a control writes it to storage",
+    (await onPage(`(async () => (await chrome.storage.sync.get('toastPosition')).toastPosition)()`)) === "top-right");
+  await onPage(`chrome.storage.sync.set({toastPosition: 'off'})`);
+  const optionErrors = options.logs.filter((l) => /exception|\[error\]/i.test(l));
+  check("and it does all that without throwing", optionErrors.length === 0, optionErrors.join(" | "));
 
   console.log("\nconsole cleanliness");
   const errors = page.logs.filter((l) => /exception|\[error\]/i.test(l));
