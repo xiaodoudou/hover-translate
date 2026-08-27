@@ -6,7 +6,17 @@
   body { margin: 0; padding: 16px; font: 15px/1.7 "Segoe UI", "Microsoft YaHei", sans-serif; background: #f7f7f7; }
   .msg { max-width: 420px; margin: 0 0 12px; padding: 10px 14px; background: #fff; border-radius: 10px; }
   .me { background: #d9f0ff; margin-left: auto; }
+  #deep-frame { width: 100%; height: 130px; border: 1px solid #ddd; }
 </style>
 <div class="msg" id="framed-msg">不太明白您的意思</div>
 <div class="msg me">请问这个商品还有货吗</div>
 <div class="msg">您好，这款目前有现货，今天下单明天发出。</div>
+<iframe id="deep-frame" title="deep framed chat"></iframe>
+<script>
+  // Cross-origin to both the page above it and the top document, off the same server: 127.0.0.1 and
+  // localhost are different origins. So this frame cannot reach window.top.document, which is the
+  // shape a chat two frames down has on a real site.
+  const host = location.hostname === "localhost" ? "127.0.0.1" : "localhost";
+  document.getElementById("deep-frame").src =
+    `${location.protocol}//${host}:${location.port}/test/frames-grandchild.html`;
+</script>

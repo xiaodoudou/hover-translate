@@ -358,10 +358,15 @@ installHover({
   // on, or one in the field it is over, is the more exact of the two instructions and takes it.
   quickReady: (at) => Boolean(selectionAt(at)),
   onQuick: handleSelection,
+  // The count is handed back rather than announced here. Escape is a global undo, so on a framed
+  // page every frame reverts; the top one adds the numbers up and says it once, instead of each
+  // frame putting its own notice inside its own viewport.
   onEscape: () => {
     render.clearAim();
     hideBubble();
-    const count = render.revertAll() + hideAllImageOverlays();
+    return render.revertAll() + hideAllImageOverlays();
+  },
+  onRestored: (count) => {
     if (count) toast(`Restored ${count} block${count === 1 ? "" : "s"}.`, { position: settings.toastPosition });
   },
 });

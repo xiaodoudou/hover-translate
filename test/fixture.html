@@ -111,10 +111,20 @@ things that must stay untouched.</p>
 
 <h2>A chat inside an iframe, the shape a support widget uses</h2>
 <section>
-  <iframe id="chat-frame" src="frames-child.html" width="520" height="180" style="border:1px solid #ddd"></iframe>
-  <p class="expect">Ctrl over a message inside the frame translates that message. Mouse events go to
-  the frame under the pointer, key events to the focused one, so this only works if the frame the
-  pointer is over is the one that acts.</p>
+  <p id="above-frame" lang="zh-CN">不太明白您的意思</p>
+  <iframe id="chat-frame" src="frames-child.html" width="520" height="330" style="border:1px solid #ddd"></iframe>
+  <p class="expect">Ctrl over a message inside the frame translates that message, and only that
+  message. Mouse events go to the frame under the pointer, key events to the focused one, so this
+  only works if the frame the pointer is over is the one that acts. The innermost frame is two deep
+  and cross-origin to everything above it, which is the shape that used to be unreachable.</p>
+</section>
+
+<h2>A frame with no URL of its own</h2>
+<section>
+  <iframe id="srcdoc-frame" width="520" height="110" style="border:1px solid #ddd"
+    srcdoc="&lt;body style=&quot;margin:0;padding:16px;font:15px/1.7 sans-serif&quot;&gt;&lt;div id=&quot;srcdoc-msg&quot; style=&quot;max-width:420px;padding:10px 14px;background:#eef;border-radius:10px&quot;&gt;不太明白您的意思&lt;/div&gt;&lt;/body&gt;"></iframe>
+  <p class="expect">srcdoc has no URL to match, so the content script only reaches it through
+  match_origin_as_fallback.</p>
 </section>
 
 <h2>Images are read and painted over</h2>
@@ -190,11 +200,20 @@ const total = items.reduce((a, b) =&gt; a + b, 0);</code></pre>
   <p id="quick-latin" lang="en">Select part of this sentence, and only the words inside the selection
   are replaced, leaving the rest of the line exactly as it was.</p>
   <textarea id="quick-field" rows="2" cols="40">这是输入框里的文字，选中一部分再按快捷键。</textarea>
+  <pre id="quick-editor" contenteditable="true" style="white-space:pre-wrap;font:15px/1.7 sans-serif;border:1px solid #ddd;padding:8px;max-width:32em">这是聊天输入框里的草稿，选中一部分再按快捷键。</pre>
   <p class="expect">Select some text and tap the quick key twice. The selection is replaced where it
   sits and Esc puts it back. Which language it goes to follows the writing system it is in, so these
-  two go opposite ways. The last one is a field: nothing in it is in the page's selection at all, so
-  it is taken as a range of characters in its value instead.</p>
+  two go opposite ways. The last two are boxes you write in rather than passages you read: the
+  textarea holds no nodes at all, and the contenteditable pre is the shape Taobao's chat box has.
+  Neither is wrapped in anything, because a wrapper would be sent with the message.</p>
 </section>
 
+<script>
+  // The innermost chat frame is cross-origin, so neither the test runner nor this page can read its
+  // document. It posts its own text up on a timer; this is where the runner picks it up.
+  window.addEventListener("message", (event) => {
+    if (event.data?.htTest === "deep") window.__deepText = event.data.text;
+  });
+</script>
 </body>
 </html>

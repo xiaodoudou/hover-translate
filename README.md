@@ -4,9 +4,10 @@
 tap <kbd>Ctrl</kbd>, and it is translated in place. Tap it again to get the original back,
 <kbd>Esc</kbd> restores the whole page.
 
-![Hover Translate replacing a paragraph in place, then reading an image](docs/demo.gif)
+![Hover Translate replacing paragraphs in place, reading an image, translating a selection and a comment being written](docs/demo.gif)
 
-*Replace, bilingual, bubble, then an image read and translated.*
+*Replace, bilingual, bubble, an image read, half a sentence replaced on its own, a comment written in
+English and sent out in Chinese, and the settings page it is all set from.*
 
 No account, no API key, no paid service. Three free providers, tried in the order you choose:
 
@@ -52,6 +53,11 @@ the failover moves on to Lens.
    target language, display mode and provider order. There is no toolbar button: the extension is
    worked entirely from the keyboard, so it takes no room in the toolbar.
 
+A fresh install opens that page by itself, since with nothing in the toolbar there would otherwise be
+nothing to find.
+
+![The settings page, its How to use card opening and the page scrolling through each group of settings](docs/demo-settings.gif)
+
 ## Use
 
 | Action | Result |
@@ -59,7 +65,7 @@ the failover moves on to Lens.
 | Hover text, tap <kbd>Ctrl</kbd> | Translates the block under the pointer |
 | Hover an image, tap <kbd>Ctrl</kbd> | Reads the image and lays the translation over it |
 | Hold <kbd>Ctrl</kbd> | Translates nothing, and outlines the block that would be, if you asked for that |
-| Select text, tap <kbd>Ctrl</kbd> on it | Replaces just the selection, in the page or in a field |
+| Select text, tap <kbd>Ctrl</kbd> on it | Replaces just the selection, in the page, in a field or in a chat box |
 | Tap <kbd>Ctrl</kbd> on a translated block or image | Restores it |
 | <kbd>Esc</kbd> | Restores every block and image on the page |
 
@@ -83,6 +89,8 @@ The trigger takes whole blocks, which is right for a paragraph and useless for h
 translate takes the selection instead: select any text, tap <kbd>Ctrl</kbd> on it, and those words are
 replaced where they sit. In the page that is a view like any other translation, and tapping the key
 on it again puts the original back.
+
+![Half a Chinese sentence replaced with English, then an English comment typed into a box and sent out in Chinese](docs/demo-selection.gif)
 
 It is the trigger's own key by default, and what is under the pointer tells the two meanings apart. A
 press on a key both use goes to whichever of them has something to act on: a selection where you are
@@ -108,6 +116,13 @@ do. The field's own undo is the way back, which is why the write goes through th
 command rather than assigning to the value: that is also what tells a framework holding the value
 what changed. Passwords are refused outright, since they would be sent to a translation endpoint like
 any other string, and so are readonly and disabled fields, which nothing could be written back to.
+
+A chat box is usually not a field at all. Taobao's is a `<pre>` the page marked contenteditable, and
+there the selection API does report a real range, so it used to be wrapped in a span like any passage
+of the page. An editor serialises that wrapper straight into whatever gets sent. So those go through
+the editing command as well, and count as your text for the same reason a field does: nothing of this
+extension's is left in the box to travel with the message. Pointing anywhere in the box counts too,
+the way it does for a field, rather than only at the words you selected.
 
 <kbd>Alt</kbd> is not offered for either. The browser answers a bare <kbd>Alt</kbd> by moving focus to
 its own toolbar, which takes the keys with it and blurs the page, so a tap of it is one the page
@@ -271,6 +286,12 @@ python -m http.server 8731
   server's own error messages rather than a spec, so it is the first thing that will break if Google
   renumbers those fields. The failover means that degrades to Yandex rather than to nothing.
 - A block over 5000 characters is refused, so a stray hover cannot rewrite half a page.
+- Pages that build their chat out of nested frames are handled, whatever the nesting and whatever the
+  origins: the press is passed from frame to frame until the whole tree has seen it, and the frame the
+  pointer is actually over is the one that acts. What still cannot work is a frame that runs no
+  content script of its own, either because it is sandboxed without `allow-scripts` or because its
+  scheme is outside the ones the extension matches. Nothing inside such a frame can be translated,
+  and nothing below it can be reached either.
 - An image over 12 MB is refused.
 - Reloading or updating the extension leaves the copy already injected into open tabs with nothing
   behind it, and only a page load gets a fresh one. Rather than repeating Chrome's "Extension context

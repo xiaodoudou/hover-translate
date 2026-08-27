@@ -1,16 +1,21 @@
 // The selected text, taken as one replaceable piece.
 //
-// Two kinds of selection, one shape handed back for both. Text in the page is wrapped in a span of
-// ours, because a selection is not a block: it starts and ends wherever the user let go, and it can
-// cross elements the page, not the reader, decided to put there. Text inside an input or a textarea
-// is not in the DOM at all and no selection API reports it, so that kind is a range of characters in
-// the field's value instead. Either way the caller gets one element to mark, one string to send, and
-// two ways of writing to it.
+// Three kinds of selection, one shape handed back for all of them. Text in the page is wrapped in a
+// span of ours, because a selection is not a block: it starts and ends wherever the user let go, and
+// it can cross elements the page, not the reader, decided to put there. Text inside an input or a
+// textarea is not in the DOM at all and no selection API reports it, so that kind is a range of
+// characters in the field's value instead. Text inside something contenteditable is in the DOM and
+// does have a range, but it is being written rather than read: a wrapper of ours would be serialised
+// into whatever gets sent, so it is written through the editing command like a field. Every way, the
+// caller gets one element to mark, one string to send, and two ways of writing to it.
 
 import { scriptGroup } from "../lib/script.js";
 import { ATTR_STATE } from "../lib/rules.js";
 
 const FIELDS = new Set(["INPUT", "TEXTAREA"]);
+// The element the page declared editable, rather than whichever tag the selection happens to start
+// in. Taobao's chat box is a contenteditable <pre>, and the draft is typed straight into it.
+const EDITABLE = '[contenteditable=""],[contenteditable="true"],[contenteditable="plaintext-only"]';
 // A selection ends where the pointer was let go, which is often a hair outside its own rectangle.
 const EDGE = 3;
 
@@ -28,8 +33,12 @@ export function selectionAt(at) {
 export function takeSelection(at) {
   const found = selectionAt(at);
   if (!found) return null;
-  return found.field ? takeField(found) : takeRange(found);
+  if (found.field) return takeField(found);
+  if (found.host) return takeEditor(found);
+  return takeRange(found);
 }
+
+const editorHost = (el) => (el.isContentEditable ? el.closest(EDITABLE) || el : null);
 
 function findField(at) {
   const field = document.activeElement;
@@ -64,12 +73,19 @@ function findRange(at) {
   const scope = range.commonAncestorContainer;
   const element = scope.nodeType === Node.ELEMENT_NODE ? scope : scope.parentElement;
   if (!element) return null;
-  // Text the page expects to own the shape of: an editor would serialise this wrapper into whatever
-  // is being written, and there is no telling where that gets saved.
-  if (element.isContentEditable) return null;
   // Our own overlays, and anything already replaced: nesting one of these inside another gives the
   // inner one a parent that undoing the outer one takes away.
   if (element.closest(`[data-ht-ui],[${ATTR_STATE}]`)) return null;
+
+  // A draft being written. Pointing anywhere in the box counts, the way it does for a field, rather
+  // than only at the selected words: it is one place the user is looking at, not a passage of the
+  // page they happened to sweep across.
+  const host = editorHost(element);
+  if (host) {
+    if (at && !covers(host.getBoundingClientRect(), at)) return null;
+    return { range, text, host };
+  }
+
   if (at && ![...range.getClientRects()].some((rect) => covers(rect, at))) return null;
   return { range, text };
 }
@@ -101,6 +117,54 @@ function takeField({ field, start, end }) {
     // What is typed here is the user's own text, not a view of the page. Once it is translated the
     // translation is what they wrote, so nothing marks the field and nothing offers to put it back:
     // the field's own undo does that, which is why the write goes through the editing command.
+    editable: true,
+    replace: write,
+    restore: () => write(original),
+  };
+}
+
+// An editor is written to the way a field is, and for the same reason: through the editing command,
+// which keeps the page's own undo history and fires the input event a framework-held box needs to
+// notice the change. Nothing of ours goes into the tree, so nothing of ours can be sent.
+function takeEditor({ range, text, host }) {
+  const original = range.toString();
+  // What stands there now, and where. execCommand leaves the caret at the end of what it wrote, so
+  // the start is that many characters back: that range is how the same words are found again to be
+  // replaced or put back.
+  let shown = original;
+  let written = range.cloneRange();
+
+  const write = (next) => {
+    if (next === shown || !written || !host.isConnected) return;
+    host.focus();
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(written);
+    if (!document.execCommand("insertText", false, next)) {
+      written = null;
+      return;
+    }
+    shown = next;
+    const node = selection.focusNode;
+    const end = selection.focusOffset;
+    // Anything but a single text node means the text landed across several, and there is no honest
+    // way to point at it again: what was written stands, and nothing further is offered.
+    if (node?.nodeType !== Node.TEXT_NODE || end < next.length) {
+      written = null;
+      return;
+    }
+    written = document.createRange();
+    written.setStart(node, end - next.length);
+    written.setEnd(node, end);
+  };
+
+  return {
+    element: host,
+    text: text,
+    group: scriptGroup(original),
+    // The same as a field: what is in here is the user's own words, so once translated the
+    // translation is what they wrote. Nothing marks the box and nothing offers to put it back, since
+    // the editor's own undo already does, which is the whole point of writing through the command.
     editable: true,
     replace: write,
     restore: () => write(original),

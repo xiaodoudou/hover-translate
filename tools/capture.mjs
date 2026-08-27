@@ -89,6 +89,15 @@ await page.send("Runtime.enable");
 await page.send("Page.enable");
 await page.send("Emulation.setDeviceMetricsOverride", { width: W, height: H, deviceScaleFactor: 1, mobile: false });
 
+// Installing opens the settings in a tab of its own, which leaves the demo page in the background,
+// where a headless screenshot never arrives at all. Closed here, and the last scene opens its own.
+for (const target of await (await fetch(`http://127.0.0.1:${CDP}/json/list`)).json()) {
+  if (target.url?.startsWith(`chrome-extension://${EXT}/src/options/`)) {
+    await fetch(`http://127.0.0.1:${CDP}/json/close/${target.id}`);
+  }
+}
+await page.send("Page.bringToFront");
+
 const main = async (expression) => {
   const m = await page.send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
   if (m.result?.exceptionDetails) throw new Error(m.result.exceptionDetails.exception?.description || "eval failed");
@@ -137,17 +146,34 @@ const moveCursor = (x, y) =>
     c.style.left = '${x}px'; c.style.top = '${y}px'; return true; })()`);
 
 const frames = [];
-async function grab() {
-  const shot = await page.send("Page.captureScreenshot", { format: "png" });
+// `from` is the tab being filmed: the demo page for most of it, the settings page for the last scene.
+async function grab(from = page) {
+  const shot = await from.send("Page.captureScreenshot", { format: "png" });
   const file = join(frameDir, `f${String(frames.length).padStart(4, "0")}.png`);
   await writeFile(file, Buffer.from(shot.result.data, "base64"));
   frames.push({ file, at: Date.now() });
   return file;
 }
 
-async function hold(ms) {
+async function hold(ms, from = page) {
   const until = Date.now() + ms;
-  while (Date.now() < until) await grab();
+  while (Date.now() < until) await grab(from);
+}
+
+const tapCtrl = async (target = page) => {
+  const key = { key: "Control", code: "ControlLeft", windowsVirtualKeyCode: 17, nativeVirtualKeyCode: 17 };
+  await target.send("Input.dispatchKeyEvent", { type: "rawKeyDown", ...key, modifiers: 2 });
+  await sleep(40);
+  await target.send("Input.dispatchKeyEvent", { type: "keyUp", ...key });
+};
+
+// Straight lines look like a script; a hand arrives, slows down and settles.
+async function approach(to, from = { x: 120, y: 90 }) {
+  for (const step of [0.0, 0.4, 0.7, 0.9, 1.0]) {
+    await moveCursor(Math.round(to.x * step + from.x * (1 - step)), Math.round(to.y * step + from.y * (1 - step)));
+    await grab();
+  }
+  await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: to.x, y: to.y, button: "none" });
 }
 
 await rm(stills, { recursive: true, force: true });
@@ -251,6 +277,147 @@ let imageStart = 0;
   console.log("  4-image-loading.png\n  4-image.png");
 }
 
+// --- a selection, in the page and in what you are writing -----------------
+// The other half of the extension: not the block, but the words you highlighted. Two scenes, because
+// they are two different things underneath and the second one is the reason people want it.
+let selectionStart = 0;
+{
+  selectionStart = frames.length;
+  await inExtension(`chrome.storage.sync.set({displayMode: "replace", translateImages: false,
+    quickKey: "trigger", minLoadingMs: ${LOADING_MS},
+    quickOrder: [{group:"latin",lang:"en"},{group:"han",lang:""},{group:"kana",lang:""},
+                 {group:"hangul",lang:""},{group:"cyrillic",lang:""},{group:"arabic",lang:""},
+                 {group:"other",lang:""}]})`);
+  await sleep(500);
+  await page.send("Page.reload");
+  await sleep(2200);
+  await main(CURSOR);
+  await main(LABEL("Or only what you selected"));
+
+  // Half a sentence, highlighted the way a reader would, so the scene shows the selection itself and
+  // then the same words replaced with the rest of the line untouched around them.
+  const at = await main(`(() => {
+    const p = document.querySelectorAll('article > p')[3];
+    p.scrollIntoView({block: 'center'});
+    const node = p.firstChild;
+    const range = document.createRange();
+    range.setStart(node, 0);
+    range.setEnd(node, 22);
+    getSelection().removeAllRanges();
+    getSelection().addRange(range);
+    const r = range.getClientRects()[0];
+    return {x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2)}; })()`);
+  await hold(700);
+  await approach(at);
+  await hold(600);
+  await tapCtrl();
+  await sleep(450);
+  await hold(LOADING_MS - 300);
+  await sleep(600);
+  await hold(1300);
+  await writeFile(join(stills, "5-selection.png"), await readFile(await grab()));
+  console.log("  5-selection.png");
+}
+
+{
+  // Writing a comment in your own language and sending it out in the page's: the one row that has to
+  // be set for it, latin going to Chinese, is the row the settings page opens on.
+  await inExtension(`chrome.storage.sync.set({quickOrder: [{group:"latin",lang:"zh"},
+    {group:"han",lang:"en"},{group:"kana",lang:""},{group:"hangul",lang:""},
+    {group:"cyrillic",lang:""},{group:"arabic",lang:""},{group:"other",lang:""}]})`);
+  await sleep(400);
+  await main(LABEL("Even what you are writing"));
+
+  const box = await main(`(() => { const el = document.getElementById('comment');
+    el.scrollIntoView({block: 'center'});
+    const r = el.getBoundingClientRect();
+    return {x: Math.round(r.left + 40), y: Math.round(r.top + 20)}; })()`);
+  await approach(box);
+  await hold(400);
+  await page.send("Input.dispatchMouseEvent", { type: "mousePressed", x: box.x, y: box.y, button: "left", clickCount: 1 });
+  await page.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: box.x, y: box.y, button: "left", clickCount: 1 });
+  await grab();
+
+  // Typed in pieces so the writing is something you watch happen rather than a jump cut.
+  for (const chunk of ["Great review, ", "thanks. ", "Does it come ", "with a charger?"]) {
+    await page.send("Input.insertText", { text: chunk });
+    await hold(220);
+  }
+  await hold(500);
+
+  const line = await main(`(() => { const el = document.getElementById('comment');
+    el.setSelectionRange(0, el.value.length);
+    const r = el.getBoundingClientRect();
+    return {x: Math.round(r.left + 120), y: Math.round(r.top + 22)}; })()`);
+  await moveCursor(line.x, line.y);
+  await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: line.x, y: line.y, button: "none" });
+  await hold(800);
+  await tapCtrl();
+  await sleep(450);
+  await hold(LOADING_MS - 300);
+  await sleep(600);
+  await hold(1600);
+  await writeFile(join(stills, "6-field.png"), await readFile(await grab()));
+  console.log("  6-field.png");
+}
+
+// --- the settings, which are a page of their own --------------------------
+let settingsStart = 0;
+{
+  settingsStart = frames.length;
+  await inExtension(`chrome.storage.sync.set({displayMode: "replace", translateImages: false,
+    quickKey: "trigger", minLoadingMs: 400,
+    quickOrder: [{group:"latin",lang:"en"},{group:"han",lang:""},{group:"kana",lang:""},
+                 {group:"hangul",lang:""},{group:"cyrillic",lang:""},{group:"arabic",lang:""},
+                 {group:"other",lang:""}]})`);
+  await sleep(400);
+
+  const tab2 = await (await fetch(
+    `http://127.0.0.1:${CDP}/json/new?chrome-extension://${EXT}/src/options/options.html`, { method: "PUT" },
+  )).json();
+  await sleep(1400);
+  const options = attach(tab2.webSocketDebuggerUrl);
+  await options.ready;
+  await options.send("Runtime.enable");
+  await options.send("Page.enable");
+  await options.send("Emulation.setDeviceMetricsOverride", { width: W, height: H, deviceScaleFactor: 1, mobile: false });
+  await options.send("Page.bringToFront");
+  await sleep(600);
+
+  const onOptions = async (expression) => {
+    const m = await options.send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
+    return m.result?.result?.value;
+  };
+  await onOptions(CURSOR);
+  await onOptions(LABEL("Everything else is a page"));
+  // Parked somewhere sensible before the first frame, or it is drawn in the corner it was created in.
+  await onOptions(`(() => { const c = document.getElementById('demo-cursor');
+    c.style.left = '620px'; c.style.top = '300px'; return true; })()`);
+  await hold(1100, options);
+  await writeFile(join(stills, "7-settings.png"), await readFile(await grab(options)));
+
+  // Unfolded, since a folded card in a still says nothing about what is in it.
+  const summary = await onOptions(`(() => { const s = document.querySelector('details.card > summary');
+    const r = s.getBoundingClientRect();
+    return {x: Math.round(r.left + 40), y: Math.round(r.top + r.height / 2)}; })()`);
+  for (const step of [0.0, 0.5, 0.8, 1.0]) {
+    await onOptions(`(() => { const c = document.getElementById('demo-cursor');
+      c.style.left = '${Math.round(summary.x * step + 620 * (1 - step))}px';
+      c.style.top = '${Math.round(summary.y * step + 300 * (1 - step))}px'; return true; })()`);
+    await grab(options);
+  }
+  await onOptions(`document.querySelector('details.card').open = true`);
+  await hold(1500, options);
+
+  // Down the page, slowly enough to read what is passing.
+  for (let y = 0; y <= 900; y += 60) {
+    await onOptions(`window.scrollTo(0, ${y})`);
+    await grab(options);
+  }
+  await hold(1200, options);
+  console.log("  7-settings.png");
+}
+
 chrome.kill();
 server.close();
 await sleep(300);
@@ -292,11 +459,19 @@ console.log("  docs/demo.mp4");
 await makeGif(listFile, join(docs, "demo.gif"), 880, "full");
 console.log("  docs/demo.gif");
 
-// The image scene on its own, for the README section about images: the whole demo is too long to
-// ask someone to sit through to reach the part they are reading about.
-const imageList = await frameList(frames.slice(imageStart), "frames-image.txt");
+// Each scene again on its own, for the README section about it: the whole demo is too long to ask
+// someone to sit through to reach the part they are reading about.
+const imageList = await frameList(frames.slice(imageStart, selectionStart), "frames-image.txt");
 await makeGif(imageList, join(docs, "demo-image.gif"), 760, "image");
 console.log("  docs/demo-image.gif");
+
+const selectionList = await frameList(frames.slice(selectionStart, settingsStart), "frames-selection.txt");
+await makeGif(selectionList, join(docs, "demo-selection.gif"), 760, "selection");
+console.log("  docs/demo-selection.gif");
+
+const settingsList = await frameList(frames.slice(settingsStart), "frames-settings.txt");
+await makeGif(settingsList, join(docs, "demo-settings.gif"), 760, "settings");
+console.log("  docs/demo-settings.gif");
 
 // YouTube is 16:9. Padding here rather than letting YouTube do it keeps the bars on brand.
 await run("ffmpeg", ["-y", "-loglevel", "error", "-i", mp4,
