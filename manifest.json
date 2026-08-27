@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Hover Translate",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "description": "Point at any text or image, tap Ctrl, and read it in your language. Free, no account, no API key.",
   "minimum_chrome_version": "116",
   "permissions": [
