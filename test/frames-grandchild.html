@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<title>deep framed chat</title>
+<style>
+  body { margin: 0; padding: 16px; font: 15px/1.7 "Segoe UI", "Microsoft YaHei", sans-serif; background: #fff8e7; }
+  .msg { max-width: 420px; margin: 0 0 12px; padding: 10px 14px; background: #fff; border-radius: 10px; }
+</style>
+<div class="msg" id="deep-framed-msg">不太明白您的意思</div>
+<div class="msg">这条消息在第三层框架里</div>
+<script>
+  // Cross-origin, so the test runner cannot read this document from the top frame, and a frame in
+  // another process is not in the page target's context list either. It reports its own text up
+  // instead, and the fixture parks it somewhere readable.
+  setInterval(() => {
+    const text = document.getElementById("deep-framed-msg").textContent.trim();
+    window.top.postMessage({ htTest: "deep", text }, "*");
+  }, 200);
+</script>

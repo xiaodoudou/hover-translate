@@ -26,7 +26,9 @@
   "content_scripts": [
     {
       "matches": [
-        "<all_urls>"
+        "http://*/*",
+        "https://*/*",
+        "file:///*"
       ],
       "js": [
         "src/content/loader.js"
@@ -35,7 +37,8 @@
         "src/styles/content.css"
       ],
       "run_at": "document_idle",
-      "all_frames": true
+      "all_frames": true,
+      "match_origin_as_fallback": true
     }
   ],
   "web_accessible_resources": [

@@ -831,6 +831,32 @@ try {
   await ev(`(() => { const el = document.getElementById('quick-field');
     el.value = ${JSON.stringify(fieldAt.value)}; el.blur(); })()`);
 
+  // Taobao's chat box is a contenteditable <pre>. It has a real range in the DOM, unlike a field,
+  // but it is still text being written rather than read: the span the page path wraps a selection in
+  // would be serialised straight into the message. So it goes through the editing command too, and
+  // the box is left holding nothing but its own words.
+  const editorWas = await ev(`document.getElementById('quick-editor').textContent`);
+  const editorPicked = await select("quick-editor", 0, 9);
+  check("a range inside the chat box is selected", editorPicked === "这是聊天输入框里的", editorPicked);
+  await tapTrigger();
+  await settle(`!/^这是聊天输入框里的/.test(document.getElementById('quick-editor').textContent)`);
+  const editor = await ev(`(() => { const el = document.getElementById('quick-editor');
+    return { text: el.textContent, elements: el.querySelectorAll('*').length,
+             state: el.getAttribute('data-ht-state') }; })()`);
+  console.log("   ", JSON.stringify(editor));
+  check("text selected in the chat box is translated where it sits",
+    editor.text !== editorWas && !/^这是聊天输入框里的/.test(editor.text), editor.text);
+  check("and the rest of the draft is left alone",
+    editor.text.endsWith("草稿，选中一部分再按快捷键。"), editor.text);
+  check("with nothing of ours in the box to be sent along with it",
+    editor.elements === 0 && editor.state === null, JSON.stringify(editor));
+  // Same as a field, and for the same reason: the translation is the message now.
+  await tapTrigger();
+  await sleep(1200);
+  await escape();
+  check("so neither the trigger key nor escape takes the draft back",
+    (await ev(`document.getElementById('quick-editor').textContent`)) === editor.text);
+
   // --- every provider, driven through the real extension ----------------
   console.log("\neach provider serves a real page");
   const TAGGED = "<b0>这是一段</b0>简体中文的<b1>测试文字</b1>。";
@@ -1138,6 +1164,111 @@ try {
   check("the message inside the frame was translated", afterFramed !== beforeFramed, afterFramed);
   check("and the top document was left alone",
     (await ev(`document.querySelectorAll('[data-ht-state]').length`)) === translatedBefore);
+
+  // --- two frames down, cross-origin, focus on neither ---------------------
+  // The shape Taobao's chat has. The message is two frames deep, that frame is cross-origin so it
+  // cannot reach the top document to listen on, and focus sits in the frame in between rather than
+  // on top. Every hop has to pass the press along for this to work at all.
+  //
+  // Deliberately not a single jump of the pointer: moving across the top document and then across
+  // the middle frame leaves each of them holding a pointer position of their own, which is what
+  // makes the last two assertions worth anything.
+  console.log("\na message two frames down, with focus in the frame in between");
+  const deepText = () => inPage(`window.__deepText || ''`);
+  const middleTranslated = () =>
+    inPage(`document.getElementById('chat-frame').contentDocument.querySelectorAll('[data-ht-state]').length`);
+
+  const deepSpot = await inPage(`(() => {
+    const f = document.getElementById('chat-frame');
+    f.scrollIntoView({block: 'center'});
+    const outer = f.getBoundingClientRect();
+    const child = f.contentDocument;
+    // Measured rather than guessed: the first message in the middle frame is already translated by
+    // now, so everything below it has moved.
+    const at = (el, dx) => {
+      const r = el.getBoundingClientRect();
+      return { x: Math.round(outer.left + r.left + dx), y: Math.round(outer.top + r.top + r.height / 2) };
+    };
+    const own = (el, dx) => {
+      const r = el.getBoundingClientRect();
+      return { x: Math.round(r.left + dx), y: Math.round(r.top + r.height / 2) };
+    };
+    // Into the deep frame from its top edge: its own first message, not the centre of the frame.
+    const into = (el, dx, dy) => {
+      const r = el.getBoundingClientRect();
+      return { x: Math.round(outer.left + r.left + dx), y: Math.round(outer.top + r.top + dy) };
+    };
+    return {
+      above: own(document.getElementById('above-frame'), 40),
+      middle: at(child.querySelectorAll('.msg')[2], 40),
+      deep: into(child.getElementById('deep-frame'), 60, 38),
+    };
+  })()`);
+
+  // Focus lands in the middle frame, and nowhere near where the press will be aimed.
+  await page.send("Input.dispatchMouseEvent", { type: "mousePressed", ...deepSpot.middle, button: "left", clickCount: 1 });
+  await page.send("Input.dispatchMouseEvent", { type: "mouseReleased", ...deepSpot.middle, button: "left", clickCount: 1 });
+  await sleep(200);
+  const focusFrame = await inPage(`document.activeElement?.id || document.activeElement?.tagName || ''`);
+  check("focus is on the middle frame, not the top document or the deep one",
+    focusFrame === "chat-frame", focusFrame);
+
+  for (const spot of [deepSpot.above, deepSpot.middle, deepSpot.deep]) {
+    await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", ...spot, button: "none" });
+    await sleep(120);
+  }
+
+  const beforeDeep = await deepText();
+  check("the deep frame is reporting itself", Boolean(beforeDeep), JSON.stringify(beforeDeep));
+  const topTranslatedBefore = await ev(`document.querySelectorAll('[data-ht-state]').length`);
+  const middleBefore = await middleTranslated();
+
+  await page.send("Input.dispatchKeyEvent", { type: "rawKeyDown", ...ctrl, modifiers: 2 });
+  await sleep(40);
+  await page.send("Input.dispatchKeyEvent", { type: "keyUp", ...ctrl });
+  for (let i = 0; i < 60 && (await deepText()) === beforeDeep; i++) await sleep(200);
+
+  const afterDeep = await deepText();
+  console.log(`   deep message: ${JSON.stringify(beforeDeep)} -> ${JSON.stringify(afterDeep)}`);
+  check("the message two frames down was translated", afterDeep !== beforeDeep, afterDeep);
+  // One press, one translation: the frames holding a stale pointer must not have acted on it too.
+  const topAfter = await ev(`document.querySelectorAll('[data-ht-state]').length`);
+  const middleAfter = await middleTranslated();
+  check("and the top document was left alone", topAfter === topTranslatedBefore,
+    `${topTranslatedBefore} -> ${topAfter}`);
+  check("and so was the frame in between", middleAfter === middleBefore,
+    `${middleBefore} -> ${middleAfter}`);
+
+  // --- a frame with no URL of its own -------------------------------------
+  // srcdoc matches no pattern, so the content script only reaches it through
+  // match_origin_as_fallback.
+  console.log("\na srcdoc frame gets the content script too");
+  const srcdocText = () =>
+    inPage(`document.getElementById('srcdoc-frame').contentDocument.getElementById('srcdoc-msg').textContent.trim()`);
+  const srcdocSpot = await inPage(`(() => {
+    const f = document.getElementById('srcdoc-frame');
+    f.scrollIntoView({block: 'center'});
+    const r = f.getBoundingClientRect();
+    return { x: Math.round(r.left + 60), y: Math.round(r.top + 30) };
+  })()`);
+
+  const beforeSrcdoc = await srcdocText();
+  await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", ...srcdocSpot, button: "none" });
+  await sleep(200);
+  await page.send("Input.dispatchKeyEvent", { type: "rawKeyDown", ...ctrl, modifiers: 2 });
+  await sleep(40);
+  await page.send("Input.dispatchKeyEvent", { type: "keyUp", ...ctrl });
+  for (let i = 0; i < 40 && (await srcdocText()) === beforeSrcdoc; i++) await sleep(200);
+
+  const afterSrcdoc = await srcdocText();
+  console.log(`   srcdoc message: ${JSON.stringify(beforeSrcdoc)} -> ${JSON.stringify(afterSrcdoc)}`);
+  check("the message in the srcdoc frame was translated", afterSrcdoc !== beforeSrcdoc, afterSrcdoc);
+
+  // Focus goes back to the top document, so what follows is not quietly relying on the relay.
+  await ev(`document.body.focus?.(); window.focus(); 'ok'`);
+  await page.send("Input.dispatchMouseEvent", { type: "mousePressed", x: 5, y: 5, button: "left", clickCount: 1 });
+  await page.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: 5, y: 5, button: "left", clickCount: 1 });
+  await sleep(200);
 
   // --- orphaned content script -------------------------------------------
   // Reloading the extension leaves the copy already injected into an open tab with nothing behind
