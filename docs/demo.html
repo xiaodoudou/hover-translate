@@ -33,6 +33,11 @@
   .tip b { color: #0e7490; }
   kbd { background: #fff; border: 1px solid #a5f3fc; border-bottom-width: 2px;
         border-radius: 4px; padding: 1px 5px; font: inherit; font-size: 12.5px; }
+  .comment textarea { width: 100%; resize: none; padding: 10px 12px; font: inherit; font-size: 15px;
+        color: #0f172a; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; }
+  .comment .actions { display: flex; justify-content: flex-end; margin-top: 10px; }
+  .comment button { padding: 7px 18px; font: inherit; font-size: 14px; color: #fff; cursor: pointer;
+        background: #0e7490; border: 1px solid #0e7490; border-radius: 8px; }
 </style>
 </head>
 <body>
@@ -75,6 +80,12 @@
 
   <p lang="ja">日本語の段落もあります。マウスを乗せてキーを押すと、この文も英語に置き換わります。</p>
   <p lang="ru">Здесь абзац на русском языке, чтобы проверить другой алфавит.</p>
+
+  <div class="card comment">
+    <h3>发表评论</h3>
+    <textarea id="comment" rows="3" placeholder="说点什么…"></textarea>
+    <div class="actions"><button type="button">发布</button></div>
+  </div>
 </article>
 </div>
 </body>

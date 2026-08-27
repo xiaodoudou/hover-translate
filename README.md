@@ -4,9 +4,10 @@
 tap <kbd>Ctrl</kbd>, and it is translated in place. Tap it again to get the original back,
 <kbd>Esc</kbd> restores the whole page.
 
-![Hover Translate replacing a paragraph in place, then reading an image](docs/demo.gif)
+![Hover Translate replacing paragraphs in place, reading an image, translating a selection and a comment being written](docs/demo.gif)
 
-*Replace, bilingual, bubble, then an image read and translated.*
+*Replace, bilingual, bubble, an image read, half a sentence replaced on its own, a comment written in
+English and sent out in Chinese, and the settings page it is all set from.*
 
 No account, no API key, no paid service. Three free providers, tried in the order you choose:
 
@@ -52,6 +53,11 @@ the failover moves on to Lens.
    target language, display mode and provider order. There is no toolbar button: the extension is
    worked entirely from the keyboard, so it takes no room in the toolbar.
 
+A fresh install opens that page by itself, since with nothing in the toolbar there would otherwise be
+nothing to find.
+
+![The settings page, its How to use card opening and the page scrolling through each group of settings](docs/demo-settings.gif)
+
 ## Use
 
 | Action | Result |
@@ -83,6 +89,8 @@ The trigger takes whole blocks, which is right for a paragraph and useless for h
 translate takes the selection instead: select any text, tap <kbd>Ctrl</kbd> on it, and those words are
 replaced where they sit. In the page that is a view like any other translation, and tapping the key
 on it again puts the original back.
+
+![Half a Chinese sentence replaced with English, then an English comment typed into a box and sent out in Chinese](docs/demo-selection.gif)
 
 It is the trigger's own key by default, and what is under the pointer tells the two meanings apart. A
 press on a key both use goes to whichever of them has something to act on: a selection where you are
