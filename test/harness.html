@@ -728,6 +728,77 @@ check("and the box is the height the page gave it",
   `${clamped.getBoundingClientRect().height} vs ${clampHeight}`);
 clearOverflow(clamped);
 
+// --- what the page laid out stays where the page put it --------------------
+// Shop layouts the clipped-line handling used to rearrange. The translation was right each time, and
+// something the page had placed ended up somewhere else, because the box that cut the text was grown
+// into its neighbours or had them moved into the wrapper along with the words.
+setClippedLines("fit");
+const shopBox = (markup) => {
+  const box = document.createElement("div");
+  box.innerHTML = markup;
+  document.getElementById("stage").append(box);
+  return box.firstElementChild;
+};
+const placeOf = (el) => {
+  const r = el.getBoundingClientRect();
+  return [r.left, r.top, r.width, r.height].map(Math.round).join(",");
+};
+
+// A card of fixed height with a title box two lines tall. Growing the title leaves the card the size
+// it was, which used to pass for room, and shoves the price under it down and out of the card.
+const fixedCard = shopBox(`<div style="width:160px;height:120px;overflow:hidden;line-height:18px">
+  <div class="card-title" style="height:36px;overflow:hidden">A translated product title that runs well past the two lines this box was given</div>
+  <div class="card-price">¥199.00</div></div>`);
+const cardTitle = fixedCard.querySelector(".card-title");
+const cardPrice = fixedCard.querySelector(".card-price");
+const priceAt = placeOf(cardPrice);
+markOverflow(cardTitle);
+check("a title in a card of fixed height is not grown into the price under it",
+  !cardTitle.classList.contains("ht-unclipped"), cardTitle.className);
+check("so the price is exactly where the page put it", placeOf(cardPrice) === priceAt,
+  `${priceAt} -> ${placeOf(cardPrice)}`);
+check("and the title, holding nothing but its words, rises through its own box instead",
+  cardTitle.classList.contains("ht-marquee"), cardTitle.className);
+clearOverflow(cardTitle);
+
+// A sidebar row laid out as flex, an icon beside its label. The wrapper would become the row's only
+// item, so the icon and the label were laid out again inside it and the label dropped out of view.
+const sideRow = shopBox(`<li style="list-style:none;width:150px;line-height:30px">
+  <a class="side-link" style="display:flex;align-items:center;gap:6px;height:30px;overflow:hidden;padding:0 8px"><i style="flex:none;width:14px;height:14px;background:#0ea5e9"></i><span class="side-label">A category name far too long for its row</span></a></li>`);
+const sideLabel = sideRow.querySelector(".side-label");
+const labelAt = placeOf(sideLabel);
+markOverflow(sideRow);
+check("a flex row that cuts its label is never wrapped",
+  !sideRow.querySelector(".ht-marquee-line, .ht-marquee"), sideRow.querySelector(".side-link").className);
+check("its label is still the row's own child, exactly where the row put it",
+  sideLabel.parentElement.classList.contains("side-link") && placeOf(sideLabel) === labelAt,
+  `${labelAt} -> ${placeOf(sideLabel)}`);
+clearOverflow(sideRow);
+
+// A box above the block that cuts it off and also holds the line under it. Wrapping that box carried
+// the subtitle into the wrapper along with the title.
+const infoBox = shopBox(`<div class="info" style="width:200px;height:40px;overflow:hidden;line-height:20px">
+  <div class="info-title">A translated title long enough to need at least three lines in a box this narrow</div>
+  <div class="info-sub">Sold 10,000+</div></div>`);
+const infoTitle = infoBox.querySelector(".info-title");
+const infoSub = infoBox.querySelector(".info-sub");
+check("the title really is cut by the box above it",
+  infoTitle.getBoundingClientRect().bottom > infoBox.getBoundingClientRect().bottom + 1);
+markOverflow(infoTitle);
+check("a box above the block that holds something else as well is not wrapped",
+  !infoBox.querySelector(".ht-marquee-line") && !infoBox.classList.contains("ht-marquee"), infoBox.className);
+check("so the line under the title is still the page's own child", infoSub.parentElement === infoBox);
+clearOverflow(infoTitle);
+
+// A panel the page folded to nothing is not a line it cut short, however much text is inside it.
+const folded = shopBox(`<div style="height:60px"><div class="fold" style="height:0;overflow:hidden">A translated answer the page keeps folded away until someone asks for it</div></div>`);
+const fold = folded.querySelector(".fold");
+markOverflow(fold);
+check("a folded panel stays folded",
+  fold.clientHeight === 0 && !fold.classList.contains("ht-unclipped") && !fold.classList.contains("ht-marquee"),
+  `${fold.className} / ${fold.clientHeight}`);
+clearOverflow(fold);
+
 // --- the trigger: one tap, or two -----------------------------------------
 const trigger = { triggerKey: "Control", triggerTaps: 1, doubleTapMs: 400 };
 const fired = [];
