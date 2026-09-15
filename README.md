@@ -209,6 +209,13 @@ else busy there left the text standing still and then arriving late in one jump.
 own layer belongs to the compositor and page script cannot stall it. The wrapper is stripped when
 the block is reverted, along with the animation.
 
+The wrapper only goes where it changes nothing about the layout: into a box in normal flow that holds
+the translated text and the inline elements of that text, and nothing else. A flex or grid row would
+make the wrapper its only item and lay the page's icon, badge or price out again inside it, and a box
+above the block that also holds a subtitle would carry the subtitle away with the title. Those lines
+stay cut the way the page cuts them, since a line left short is better than moving what sits beside
+it.
+
 It runs while the pointer is anywhere in the block rather than only on the box itself; a menu row is
 130px wide and 24px tall, so anything smaller stops every time a hand drifts, and leaving is given
 300ms of grace before the line is handed back. That is also why the movement is driven from the
@@ -222,8 +229,11 @@ the height changes.
 is as tall as the one line in it, so a second line pushes every row below it down and the column
 reflows under the reader; that is not free, so those lines slide. A box with slack, a row taller
 than its text, grows into it. What that costs is measured rather than guessed: the box has to end up
-showing the whole line, the block it sits in has to end exactly where it ended before, and nothing
-above it may clip the new lines away. When any of that fails the line slides instead.
+showing the whole line, the box holding it has to keep its size and place and hold the new lines
+inside it, nothing beside it may move, and nothing above it may clip the new lines away. A title box
+in a card of fixed height fails that, because growing it shoves the price under it out of the card
+even though the card itself stays put. When any of that fails the line slides instead. A box showing
+less than a line of its text is a panel the page folded away, and it stays folded.
 
 While a request is in flight a blue gradient sweeps along the bottom edge of the block. It is painted
 as a background, not a border, an outline or an appended element, so it adds no height, shifts nothing

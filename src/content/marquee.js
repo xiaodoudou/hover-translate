@@ -37,6 +37,13 @@ const MIN_HIDDEN = 12;
 const MAX_CLIP_CLIMB = 4;
 // How many lines tall a box can be and still be read as a capped line of text rather than a region.
 const MAX_CLIPPED_LINES = 6;
+// And how little of a line it can show before it is a panel the page folded away rather than a line
+// it cut short.
+const MIN_SHOWN_LINES = 0.75;
+// Where an element sits in the line of text it belongs to, rather than wherever the page placed it.
+const IN_FLOW = new Set(["static", "relative"]);
+// A line break is part of a run of text, whatever display the browser reports for it.
+const BREAKS = new Set(["BR", "WBR"]);
 // Reading pace, and the same pace the whole way. Easing a marquee spends the start of it moving a
 // fraction of a pixel per frame, which does not read as slow, it reads as the text shivering.
 const PX_PER_SECOND = 50;
@@ -150,7 +157,8 @@ function handleWide(el, block) {
   if (!SLIDABLE.has(style.display)) return false;
 
   // Preformatted text is left to slide: wrapping it would collapse the spacing it was written for.
-  if (style.whiteSpace === "nowrap" && grow(el, block)) return true;
+  if (style.whiteSpace === "nowrap" && grow(el)) return true;
+  if (!wrappable(el, block)) return false;
   slide(el, block, "x");
   return true;
 }
@@ -178,8 +186,12 @@ function handleTall(el, block) {
   // happens to hide its overflow, and moving a whole region past a window, or growing one, would be
   // a far stranger thing to do than leaving it as the page has it.
   if (el.clientHeight > line * MAX_CLIPPED_LINES) return false;
+  // Nor is a box that shows less than a line of its text: that is a panel the page folded away, and
+  // opening it would be showing what the page chose to hide.
+  if (el.clientHeight < line * MIN_SHOWN_LINES) return false;
 
-  if (growTall(el)) return true;
+  if (grow(el)) return true;
+  if (!wrappable(el, block)) return false;
   // A window one line tall is a line the page cut, whichever way it did the cutting, so it reads
   // across like every other one: the wrap is undone and the sentence moves sideways through the box
   // it always had. A taller window is a paragraph cut short, where the reading order is down the
@@ -196,61 +208,107 @@ function lineHeight(el, style = getComputedStyle(el)) {
   return parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.2 || 16;
 }
 
-// Lets the line wrap inside the width the page gave the box, so the column keeps its place and only
-// the height changes. Growing sideways is what would push the rest of the page around.
-function grow(el, block) {
-  // Read before the class goes on: whether the block ends where it used to is the whole question.
-  const bottom = block.getBoundingClientRect().bottom;
+// Lets the box take the height its text needs: the line wraps inside the width the page gave it and
+// any limit on lines comes off, so the column keeps its place and only the height changes. Growing
+// sideways is what would push the rest of the page around. Both cuts are answered this way.
+function grow(el) {
+  // Read before the class goes on: whether anything else ends up somewhere new is the whole question.
+  const before = surroundings(el);
   el.classList.add(CLASS_UNCLIPPED);
-  if (mode === "grow" || roomFor(el, block, bottom)) return true;
+  if (mode === "grow" || roomFor(el, before)) return true;
   el.classList.remove(CLASS_UNCLIPPED);
   return false;
 }
 
-// The same answer to the other cut: the limit on lines comes off and the box takes the height its
-// own text needs. Room here is the box's parent absorbing that without growing itself, which is
-// what a padded card does and what a row in a list of rows never does.
-function growTall(el) {
-  const parent = el.parentElement;
-  const before = parent?.getBoundingClientRect().bottom ?? 0;
-  el.classList.add(CLASS_UNCLIPPED);
-  if (mode === "grow") return true;
-  const shown = el.scrollHeight - el.clientHeight < 1;
-  if (shown && parent && parent.getBoundingClientRect().bottom <= before + 1) return true;
-  el.classList.remove(CLASS_UNCLIPPED);
-  return false;
+// Every box a taller box could shove: the ones beside it, and the one holding it, which answers for
+// everything further out. While that one keeps its size and its place, nothing beyond it can move.
+function surroundings(el) {
+  const holder = el.parentElement;
+  if (!holder) return [];
+  return [holder, ...holder.children].filter((n) => n !== el).map((n) => [n, n.getBoundingClientRect()]);
 }
+
+const unmoved = ([n, was]) => {
+  const now = n.getBoundingClientRect();
+  return Math.abs(now.left - was.left) <= 1 && Math.abs(now.top - was.top) <= 1 &&
+    Math.abs(now.width - was.width) <= 1 && Math.abs(now.height - was.height) <= 1;
+};
 
 // Whether the page had the room already, rather than making it. A sidebar row is as tall as its one
 // line, so growing it is not free: every row below moves down and the column the reader is looking
 // at reflows under them. Room means slack the page had spare, so nothing else moves at all.
-// What this cannot see is an ancestor that neither clips nor grows, where the new lines are drawn
-// over whatever sits below; keeping the page's size is the setting for anyone who would rather
-// never risk that.
-function roomFor(el, block, bottom) {
+//
+// The box holding it staying the same size does not show that on its own. A product card is often a
+// fixed height with a title box two lines tall inside it, and growing the title leaves the card
+// exactly as it was while the price under the title is shoved down and out of it: the page's own
+// text going somewhere else, not the translation finding room. So what sits beside the box is asked
+// too, and the new lines have to fit inside the box holding them rather than be drawn over whatever
+// sits below it.
+function roomFor(el, before) {
   // Something in the line cannot be broken, so part of it is still outside the box.
   if (el.scrollWidth - el.clientWidth >= 1) return false;
   if (el.scrollHeight - el.clientHeight >= 1) return false;
-  // The block ends where it did: the extra lines cost the page nothing.
-  if (block.getBoundingClientRect().bottom > bottom + 1) return false;
+  if (!before.length || !before.every(unmoved)) return false;
 
   const box = el.getBoundingClientRect();
-  // And they are inside it, rather than hanging below its own bottom.
-  if (box.bottom > block.getBoundingClientRect().bottom + 1) return false;
+  const holder = before[0][1];
+  if (box.bottom > holder.bottom + 1 || box.right > holder.right + 1) return false;
 
   for (let n = el.parentElement; n && n !== document.documentElement; n = n.parentElement) {
-    let style;
-    try {
-      style = getComputedStyle(n);
-    } catch {
-      return false;
-    }
+    const style = computed(n);
+    if (!style) return false;
     if (!CLIPPED.has(style.overflowX) && !CLIPPED.has(style.overflowY)) continue;
     const inside = n.getBoundingClientRect();
     if (box.bottom > inside.bottom + 1 || box.right > inside.right + 1) return false;
   }
   return true;
 }
+
+// The wrapper is the one node this extension adds to a page, and it can only go in unnoticed where
+// the box lays its contents out in normal flow and holds nothing but a run of text: then the same
+// words sit on the same lines inside it as they did in the box. Anything else in there is the page's
+// own layout. A flex or grid box would make the wrapper its only item, so the icon, the badge or the
+// price it had placed beside the words would be laid out again inside a span of ours. An inline-block
+// is a box the page sized, a float or a positioned element is placed by rules the wrapper's transform
+// changes, and a box above the block that also holds a subtitle would carry the subtitle away with
+// the title. Any of those leaves the line cut the way the page cuts it.
+function wrappable(el, block) {
+  const style = computed(el);
+  if (!style) return false;
+  const clamped = style.display === "-webkit-box" && style.webkitBoxOrient === "vertical";
+  if (!SLIDABLE.has(style.display) && !clamped) return false;
+
+  // Down from a box above the block, the block has to be all there is at every step.
+  const words = el.contains(block) ? block : el;
+  for (let n = words; n !== el; n = n.parentElement) {
+    for (const node of n.parentElement.childNodes) {
+      if (node === n || node.nodeType === Node.COMMENT_NODE) continue;
+      if (node.nodeType === Node.TEXT_NODE && !node.nodeValue.trim()) continue;
+      return false;
+    }
+    const between = computed(n);
+    if (!between || placed(between)) return false;
+    if (between.display !== "inline" && !SLIDABLE.has(between.display)) return false;
+  }
+  for (const child of words.querySelectorAll("*")) {
+    const own = computed(child);
+    if (!own) return false;
+    if (own.display === "none") continue;
+    if (placed(own)) return false;
+    if (own.display !== "inline" && !BREAKS.has(child.tagName)) return false;
+  }
+  return true;
+}
+
+function computed(el) {
+  try {
+    return getComputedStyle(el);
+  } catch {
+    return null;
+  }
+}
+
+const placed = (style) => style.float !== "none" || !IN_FLOW.has(style.position);
 
 // A marquee, in the plain sense: the line travels across the box at one steady speed and keeps
 // going. A lap runs from the line waiting off the right edge to the line gone past the left one, so
