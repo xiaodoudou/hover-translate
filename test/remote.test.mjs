@@ -106,5 +106,31 @@ console.log("\nmymemory: refuses what it cannot do rather than returning rubbish
     /source language/.test(noSource), noSource);
 }
 
+console.log("\na long block goes to the provider whose latency does not grow with it");
+{
+  // Text no cache has seen, so both providers are answering cold, as they do for a real block.
+  const WORDS = "服务 界面 启用 关闭 加速 设备 名称 支持 自定义 区分 路由器 实时 显示 运行 状态 内置 下载 架构".split(" ");
+  const body = (chars) =>
+    Array.from({ length: Math.ceil(chars / 2) }, () => WORDS[(Math.random() * WORDS.length) | 0]).join("");
+  // The pair handleTranslate() sends: the tagged copy of the block and the plain one beside it.
+  const sent = (chars) => {
+    const text = body(chars);
+    return [`<b0>${text}</b0>`, text];
+  };
+  const DEFAULT = ["tencent", "google", "mymemory"];
+
+  const short = await translate(sent(120), "en", DEFAULT);
+  check("a paragraph still goes to TranSmart, which is the better Chinese", short.provider === "tencent", short.provider);
+
+  const long = await translate(sent(2000), "en", DEFAULT);
+  check("a long block goes to Google instead", long.provider === "google", long.provider);
+  check("and is translated rather than refused", long.texts[0].length > 0, JSON.stringify(long.texts[0]).slice(0, 80));
+
+  // Reordering is only ever a tie-break between those two. An order the user set with Google
+  // already in front, or one naming a single provider, is handed back exactly as it came in.
+  const forced = await translate(sent(2000), "en", "tencent");
+  check("a forced provider is still honoured at any size", forced.provider === "tencent", forced.provider);
+}
+
 console.log(failures === 0 ? "\nALL PASS" : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);
