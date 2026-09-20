@@ -448,14 +448,51 @@ export function keepsMarkers(sent, got) {
   return [...tally.values()].every((left) => left === 0);
 }
 
+// TranSmart's round trip grows with the size of the request while Google's is flat, so the two
+// swap places on a long block. Measured cold, against text no cache had seen, sending a block the
+// way handleTranslate() does — the tagged copy and the plain one together:
+//
+//    block text     TranSmart     Google
+//      200 chars        719ms      221ms
+//      600 chars       1877ms      267ms
+//     1200 chars       3931ms      306ms
+//     2400 chars       7589ms      566ms
+//
+// and past roughly 3000 characters TranSmart stops answering at all, refusing with "outOfLimit".
+// It stays first because it is the strongest of the three on Chinese, which is worth about a
+// second on a paragraph. It is not worth eight on a long one, so past the threshold below the flat
+// provider goes first and TranSmart keeps its place directly behind it, still the first fallback.
+const SIZE_SENSITIVE = "tencent";
+const FLAT_LATENCY = "google";
+// Total characters across every text in the request, which for a block is the tagged copy plus the
+// plain one. TranSmart costs a little over a millisecond per character of that total, so this is
+// where its answer stops arriving inside a second.
+const BIG_REQUEST = 800;
+
+function orderForSize(order, texts) {
+  const size = texts.reduce((total, text) => total + text.length, 0);
+  if (size <= BIG_REQUEST) return order;
+
+  const slow = order.findIndex((provider) => provider.id === SIZE_SENSITIVE);
+  const flat = order.findIndex((provider) => provider.id === FLAT_LATENCY);
+  // Nothing to swap unless the user has both and the size-sensitive one is being tried first.
+  if (slow === -1 || flat === -1 || slow > flat) return order;
+
+  // slow < flat, so removing the flat entry leaves the index to insert at where it was.
+  const out = order.filter((provider) => provider.id !== FLAT_LATENCY);
+  out.splice(slow, 0, order[flat]);
+  return out;
+}
+
 // `preferred` is the user's order of preference. A string still works, so a single provider can be
 // forced, and anything unrecognised falls back to the full list rather than failing outright.
 export async function translate(texts, targetLang, preferred, sourceLang = "auto") {
   const wanted = typeof preferred === "string" ? [preferred] : preferred;
-  const order = (Array.isArray(wanted) ? wanted : [])
+  let order = (Array.isArray(wanted) ? wanted : [])
     .map((id) => BY_ID.get(id))
     .filter(Boolean);
   if (!order.length) order.push(...PROVIDERS);
+  order = orderForSize(order, texts);
 
   const failures = [];
   // A reply that lost its markers has not failed: the words are right and the block can still be

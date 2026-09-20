@@ -17,8 +17,11 @@ No account, no API key, no paid service. Three free providers, tried in the orde
 | **Google** | Batches natively, fastest, widest language coverage |
 | **MyMemory** | Last resort: needs to be told the source language and caps each request at 500 characters |
 
-If one fails the next is tried, so a single outage is not a dead extension. The settings page shows
-which provider served the last block and how long it took, text and images counted separately.
+If one fails the next is tried, so a single outage is not a dead extension. TranSmart's round trip
+grows with the size of the block while Google's stays flat, so on a long one the two swap places and
+TranSmart becomes the fallback: a paragraph is worth a second for the better Chinese, a page-long
+block is not worth eight. The settings page shows which provider served the last block and how long
+it took, text and images counted separately.
 
 ## Images
 
