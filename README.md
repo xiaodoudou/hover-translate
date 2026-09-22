@@ -4,10 +4,11 @@
 
 > Point at any text, tap <kbd>Ctrl</kbd>, read it in your language
 
-![GitHub Release](https://img.shields.io/github/v/release/xiaodoudou/hover-translate?style=flat-square&color=e94560)
-![License](https://img.shields.io/badge/License-MIT-blue?style=flat-square)
-![GitHub Stars](https://img.shields.io/github/stars/xiaodoudou/hover-translate?style=flat-square&color=yellow)
-![Chrome](https://img.shields.io/badge/Chrome-Manifest%20V3-4285F4?style=flat-square)
+[![GitHub Release](https://img.shields.io/github/v/release/xiaodoudou/hover-translate?style=flat-square&color=e94560)](https://github.com/xiaodoudou/hover-translate/releases/latest)
+[![License](https://img.shields.io/badge/License-MIT-blue?style=flat-square)](https://github.com/xiaodoudou/hover-translate/blob/main/LICENSE)
+[![Stars](https://img.shields.io/github/stars/xiaodoudou/hover-translate?style=flat-square&color=yellow)](https://github.com/xiaodoudou/hover-translate/stargazers)
+[![Chrome](https://img.shields.io/badge/Chrome-Manifest%20V3-4285F4?style=flat-square)](https://github.com/xiaodoudou/hover-translate/blob/main/manifest.json)
+[![Install](https://img.shields.io/badge/Install-unpacked-success?style=flat-square)](#install)
 
 **Translates whatever is under your pointer, text or image.** Point at it, tap <kbd>Ctrl</kbd>, and
 it is translated in place. Tap it again to get the original back, <kbd>Esc</kbd> restores the whole
