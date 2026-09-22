@@ -8,8 +8,6 @@
 ![License](https://img.shields.io/badge/License-MIT-blue?style=flat-square)
 ![GitHub Stars](https://img.shields.io/github/stars/xiaodoudou/hover-translate?style=flat-square&color=yellow)
 ![Chrome](https://img.shields.io/badge/Chrome-Manifest%20V3-4285F4?style=flat-square)
-![Permissions](https://img.shields.io/badge/Permissions-storage%20only-brightgreen?style=flat-square)
-![Providers](https://img.shields.io/badge/Providers-3%20free-orange?style=flat-square)
 
 **Translates whatever is under your pointer, text or image.** Point at it, tap <kbd>Ctrl</kbd>, and
 it is translated in place. Tap it again to get the original back, <kbd>Esc</kbd> restores the whole
