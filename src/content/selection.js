@@ -134,8 +134,18 @@ function takeEditor({ range, text, host }) {
   let shown = original;
   let written = range.cloneRange();
 
+  // A selection that ends at the start of the next line (a triple-click does) carries that line break
+  // as its last character. Writing without it would glue the translation onto the following line.
+  const tail = /
+$/.test(original) ? "
+" : "";
+
   const write = (next) => {
+    if (tail && !next.endsWith(tail) && next !== original) next += tail;
     if (next === shown || !written || !host.isConnected) return;
+    // Only ever replaces the words it took. If something else has been written there since, the range
+    // no longer holds them, and inserting would add a second copy beside whatever is there now.
+    if (written.toString() !== shown) return;
     host.focus();
     const selection = window.getSelection();
     selection.removeAllRanges();
@@ -160,7 +170,7 @@ function takeEditor({ range, text, host }) {
 
   return {
     element: host,
-    text: text,
+    text,
     group: scriptGroup(original),
     // The same as a field: what is in here is the user's own words, so once translated the
     // translation is what they wrote. Nothing marks the box and nothing offers to put it back, since
