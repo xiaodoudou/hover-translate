@@ -136,9 +136,7 @@ function takeEditor({ range, text, host }) {
 
   // A selection that ends at the start of the next line (a triple-click does) carries that line break
   // as its last character. Writing without it would glue the translation onto the following line.
-  const tail = /
-$/.test(original) ? "
-" : "";
+  const tail = original.endsWith("\n") ? "\n" : "";
 
   const write = (next) => {
     if (tail && !next.endsWith(tail) && next !== original) next += tail;
