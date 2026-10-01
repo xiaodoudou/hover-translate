@@ -179,6 +179,10 @@ function handleSelection(at) {
     reportOrphaned();
     return false;
   }
+  // A second press while the first is still being answered would take the same words again, and both
+  // answers would then be written beside each other.
+  const found = selectionAt(at);
+  if (found && inFlight.has(found.field || found.host)) return true;
   const taken = takeSelection(at);
   if (!taken) return false;
   translateSelection(taken).catch(() => {});
@@ -193,6 +197,7 @@ async function translateSelection(taken) {
   const targetLang = targetForGroup(settings.quickOrder, group, settings.targetLang);
 
   render.markPending(element);
+  inFlight.add(element);
   const startedAt = Date.now();
   try {
     const result = await translateTexts([text], targetLang, settings.providerOrder, text);
@@ -219,6 +224,7 @@ async function translateSelection(taken) {
     toast(`Hover Translate: ${message}`, { error: true, position: settings.toastPosition });
     reportStatus({ error: message });
   } finally {
+    inFlight.delete(element);
     render.clearPending(element);
   }
 }
