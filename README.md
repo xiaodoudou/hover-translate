@@ -34,8 +34,11 @@ No account, no API key, no paid service. Three free providers, tried in the orde
 If one fails the next is tried, so a single outage is not a dead extension. TranSmart's round trip
 grows with the size of the block while Google's stays flat, so on a long one the two swap places and
 TranSmart becomes the fallback: a paragraph is worth a second for the better Chinese, a page-long
-block is not worth eight. The settings page shows which provider served the last block and how long
-it took, text and images counted separately.
+block is not worth eight. A text provider that times out or cannot be reached goes to the back of
+the order for ten minutes, so an outage costs one timeout rather than one per block. The settings
+page shows which provider served the last block and how long it took, text and images counted
+separately; for text that is the whole wait, naming any provider that failed or was skipped on the
+way.
 
 ## Images
 
@@ -284,6 +287,12 @@ Every provider against its live endpoint:
 
 ```bash
 node test/remote.test.mjs
+```
+
+Failover and the cool-down against a stubbed network:
+
+```bash
+node test/cooldown.test.mjs
 ```
 
 Package sanity, no browser needed:
