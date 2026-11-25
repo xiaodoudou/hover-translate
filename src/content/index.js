@@ -68,6 +68,8 @@ function reportStatus(patch, key = "status") {
   }
 }
 const reportImageStatus = (patch) => reportStatus(patch, "imageStatus");
+const reportResult = ({ engine, sourceLang, ms, total, failed }) =>
+  reportStatus({ engine, sourceLang, ms, total, failed });
 
 async function translatePlain(block) {
   const text = block.innerText || "";
@@ -206,12 +208,12 @@ async function translateSelection(taken) {
 
     if (result.same) {
       toast(`Already ${result.sourceLang || "in the target language"}.`, { position: settings.toastPosition });
-      reportStatus({ engine: "skipped", sourceLang: result.sourceLang, ms: result.ms });
+      reportResult({ ...result, engine: "skipped" });
       taken.restore();
       return;
     }
     render.applySelection(taken, stripTags(result.texts[0]));
-    reportStatus({ engine: result.engine, sourceLang: result.sourceLang, ms: result.ms });
+    reportResult(result);
   } catch (error) {
     const message = String(error?.message || error);
     // Nothing is left standing in the page on a failure: what was taken exists only to carry a
@@ -288,7 +290,7 @@ async function handle(target) {
 
     if (result.same) {
       toast(`Already ${result.sourceLang || "in the target language"}.`, { position: settings.toastPosition });
-      reportStatus({ engine: "skipped", sourceLang: result.sourceLang, ms: result.ms });
+      reportResult({ ...result, engine: "skipped" });
       return;
     }
 
@@ -297,7 +299,7 @@ async function handle(target) {
     // state behind, so the next trigger would be spent reverting a bubble that is already gone.
     if (settings.displayMode === "bubble") {
       showBubble(block, plainTranslation || stripTags(result.texts[0]));
-      reportStatus({ engine: result.engine, sourceLang: result.sourceLang, ms: result.ms });
+      reportResult(result);
       return;
     }
 
@@ -306,7 +308,7 @@ async function handle(target) {
     // framework-managed nodes the page never created.
     if (settings.displayMode === "both") {
       render.applyBoth(block, plainTranslation || stripTags(result.texts[0]));
-      reportStatus({ engine: result.engine, sourceLang: result.sourceLang, ms: result.ms });
+      reportResult(result);
       return;
     }
 
@@ -315,7 +317,7 @@ async function handle(target) {
       const edits = applyInPlace(block, result.texts[0], parsed, plainTranslation);
       if (edits) {
         render.applyEdits(block, edits);
-        reportStatus({ engine: result.engine, sourceLang: result.sourceLang, ms: result.ms });
+        reportResult(result);
         return;
       }
       // The engine reordered elements, so rebuild the subtree instead.
@@ -324,7 +326,7 @@ async function handle(target) {
         result = await translatePlain(block);
         if (result.same) {
           toast(`Already ${result.sourceLang || "in the target language"}.`, { position: settings.toastPosition });
-          reportStatus({ engine: "skipped", sourceLang: result.sourceLang, ms: result.ms });
+          reportResult({ ...result, engine: "skipped" });
           return;
         }
         content = result.content ?? null;
@@ -332,7 +334,7 @@ async function handle(target) {
     }
 
     render.apply(block, content);
-    reportStatus({ engine: result.engine, sourceLang: result.sourceLang, ms: result.ms });
+    reportResult(result);
   } catch (error) {
     const message = String(error?.message || error);
     if (isOrphanError(message) || !contextAlive()) {

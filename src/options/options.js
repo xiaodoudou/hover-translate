@@ -143,11 +143,38 @@ function showStat(el, status) {
     return;
   }
 
-  const took = typeof status.ms === "number" ? `, took ${formatDuration(status.ms)}` : "";
-  setStat(el, `${engineLabel(status.engine)} at ${when}${took}`, "ok");
-  el.title = [status.host, status.sourceLang && `detected ${status.sourceLang}`]
+  // `total` is the whole wait, failed providers included; `ms` alone would make a 15 s timeout
+  // followed by a quick fallback read as a quick translation.
+  const wait = typeof status.total === "number" ? status.total : status.ms;
+  const took = typeof wait === "number" ? `, took ${formatDuration(wait)}` : "";
+  const failed = Array.isArray(status.failed) ? status.failed : [];
+  const why = failed.length
+    ? ` (${failed.map(({ id, reason }) => `${engineLabel(id)} ${shortReason(reason)}`).join(", ")})`
+    : "";
+  setStat(el, `${engineLabel(status.engine)} at ${when}${took}${why}`, failed.length ? "warn" : "ok");
+  el.title = [
+    status.host,
+    status.sourceLang && `detected ${status.sourceLang}`,
+    wait !== status.ms && typeof status.ms === "number" &&
+      `${engineLabel(status.engine)} itself answered in ${formatDuration(status.ms)}`,
+    ...failed.map(({ id, reason, since }) => {
+      const at = since ? ` since ${new Date(since).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : "";
+      return `${engineLabel(id)}: ${reason}${at}`;
+    }),
+  ]
     .filter(Boolean)
-    .join(" ");
+    .join("\n");
+}
+
+// The full reason is in the tooltip; the line itself only has room for the gist.
+function shortReason(reason) {
+  const text = String(reason || "");
+  if (text.startsWith("skipped")) return "skipped, down";
+  if (text.startsWith("timed out")) return "timed out";
+  if (text.startsWith("unreachable")) return "unreachable";
+  if (text.startsWith("lost the markers")) return "lost the markup";
+  if (/^HTTP \d+/.test(text)) return text.match(/^HTTP \d+/)[0];
+  return "failed";
 }
 
 async function refreshLastBlock() {

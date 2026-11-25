@@ -28,16 +28,71 @@ async function throttle() {
   }
 }
 
+// The failures that say the service is down rather than that this one request was wrong. Only these
+// put a provider on cool-down: a refusal or a malformed reply is about the text, not the service.
+const unreachable = (message) => Object.assign(new Error(message), { unreachable: true });
+
 async function fetchWithTimeout(url, options) {
   const controller = new AbortController();
   const abort = setTimeout(() => controller.abort(), TIMEOUT);
+  let response;
   try {
-    const response = await fetch(url, { ...options, signal: controller.signal });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    return response;
+    response = await fetch(url, { ...options, signal: controller.signal });
+  } catch (error) {
+    if (controller.signal.aborted) throw unreachable(`timed out after ${TIMEOUT / 1000} s`);
+    throw unreachable(`unreachable (${error?.message || error})`);
   } finally {
     clearTimeout(abort);
   }
+  if (response.status >= 500 || response.status === 429) throw unreachable(`HTTP ${response.status}`);
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return response;
+}
+
+// --- cool-down ------------------------------------------------------------
+// A provider that is down costs the full timeout on every block until it comes back, so after one
+// unreachable failure it goes to the back of the order for a while instead of being dropped: if
+// everything else fails too, it still gets its turn.
+const COOLDOWN = 10 * 60 * 1000;
+// Mirrored to session storage because the worker is stopped after half a minute idle, and a cool-down
+// held only in memory would be forgotten between two blocks read a minute apart.
+const cooling = new Map();
+const sessionStore = globalThis.chrome?.storage?.session;
+const restored = sessionStore
+  ? sessionStore.get("cooling").then(
+      ({ cooling: saved }) => {
+        for (const [id, entry] of Object.entries(saved || {})) cooling.set(id, entry);
+      },
+      () => {},
+    )
+  : Promise.resolve();
+
+function saveCooling() {
+  sessionStore?.set({ cooling: Object.fromEntries(cooling) }).catch(() => {});
+}
+
+function coolingSince(id) {
+  const entry = cooling.get(id);
+  if (!entry) return null;
+  if (Date.now() - entry.since < COOLDOWN) return entry;
+  cooling.delete(id);
+  saveCooling();
+  return null;
+}
+
+function coolDown(id, reason) {
+  cooling.set(id, { since: Date.now(), reason });
+  saveCooling();
+}
+
+function recover(id) {
+  if (cooling.delete(id)) saveCooling();
+}
+
+// Stable: providers keep their relative order on both sides of the split.
+function backOfTheLine(order) {
+  const ready = order.filter((provider) => !coolingSince(provider.id));
+  return [...ready, ...order.filter((provider) => !ready.includes(provider))];
 }
 
 const fetchJson = async (url, options) => (await fetchWithTimeout(url, options)).json();
@@ -89,7 +144,8 @@ async function google(texts, sourceLang, targetLang) {
     try {
       return await viaGtx(texts, sourceLang, targetLang);
     } catch (backup) {
-      throw new Error(`${primary.message}; backup: ${backup.message}`);
+      const message = `${primary.message}; backup: ${backup.message}`;
+      throw primary.unreachable && backup.unreachable ? unreachable(message) : new Error(message);
     }
   }
 }
@@ -492,34 +548,57 @@ export async function translate(texts, targetLang, preferred, sourceLang = "auto
     .map((id) => BY_ID.get(id))
     .filter(Boolean);
   if (!order.length) order.push(...PROVIDERS);
-  order = orderForSize(order, texts);
+  await restored;
+  order = backOfTheLine(orderForSize(order, texts));
 
+  const begunAt = Date.now();
   const failures = [];
+  // What the stats show next to the provider that answered, so a fast answer after a slow failure
+  // does not read as a fast translation.
+  const failed = [];
   // A reply that lost its markers has not failed: the words are right and the block can still be
   // rewritten as flat text. It is kept in case nothing better answers, and the chain carries on
   // looking for one that would let the block keep its markup as well.
   let flattened = null;
+  // Resting providers sit at the back, so any not reached by the time one answers were skipped.
+  const resting = order.map((provider) => [provider.id, coolingSince(provider.id)]).filter(([, r]) => r);
+  const tried = new Set();
+  const finish = (answer) => {
+    for (const [id, entry] of resting) {
+      if (!tried.has(id)) failed.push({ id, reason: `skipped, ${entry.reason}`, since: entry.since });
+    }
+    return { ...answer, total: Date.now() - begunAt, failed };
+  };
   for (const provider of order) {
-    // Timed from just before the request so the figure the popup shows is the provider's own
-    // round trip, not the queueing this extension added.
+    tried.add(provider.id);
+    // Timed from just before the request so `ms` is the provider's own round trip, not the queueing
+    // this extension added; `total` is the whole wait.
     try {
       await throttle();
       const startedAt = Date.now();
       const result = await provider.run(texts, sourceLang, targetLang);
+      recover(provider.id);
       const answer = { ...result, provider: provider.id, ms: Date.now() - startedAt };
-      if (keepsMarkers(texts, result.texts)) return answer;
+      if (keepsMarkers(texts, result.texts)) return finish(answer);
       flattened ??= answer;
       failures.push(`${provider.id}: lost the markers it was given`);
     } catch (error) {
-      failures.push(`${provider.id}: ${error?.message || error}`);
+      const message = error?.message || String(error);
+      failures.push(`${provider.id}: ${message}`);
+      if (error?.unreachable) coolDown(provider.id, message);
+      failed.push({ id: provider.id, reason: message });
     }
   }
-  if (flattened) return flattened;
+  if (flattened) return finish(flattened);
   throw new Error(failures.join("; ") || "no provider available");
 }
 
 async function handleTranslate({ texts, targetLang, order, sample = "" }) {
-  const { texts: translated, detected, provider, ms } = await translate(texts, targetLang, order);
+  const { texts: translated, detected, provider, ms, total, failed } = await translate(
+    texts,
+    targetLang,
+    order,
+  );
 
   // Judge every result, not just the first. A block whose Chinese sits inside child elements can
   // send a string dominated by markers and brand names, which detects as "en" or even "no" while the
@@ -540,9 +619,9 @@ async function handleTranslate({ texts, targetLang, order, sample = "" }) {
   const evidence = sample || texts.join("\n");
 
   if ((allTarget || unchanged) && !hasScriptForeignTo(evidence, targetLang)) {
-    return { same: true, sourceLang, ms };
+    return { same: true, sourceLang, ms, total, failed };
   }
-  return { texts: translated, engine: provider, sourceLang, ms };
+  return { texts: translated, engine: provider, sourceLang, ms, total, failed };
 }
 
 // There is nothing on the toolbar to click and nothing to see until a page is open, so a fresh
