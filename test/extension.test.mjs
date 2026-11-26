@@ -860,7 +860,7 @@ try {
   // --- every provider, driven through the real extension ----------------
   console.log("\neach provider serves a real page");
   const TAGGED = "<b0>这是一段</b0>简体中文的<b1>测试文字</b1>。";
-  for (const provider of ["google", "tencent", "mymemory"]) {
+  for (const provider of ["google", "alibaba", "mymemory"]) {
     const out = await ev(`(async () => await chrome.runtime.sendMessage(
       {type: 'translate', texts: [${JSON.stringify(TAGGED)}], targetLang: 'en',
        order: [${JSON.stringify(provider)}]}))()`);
@@ -872,14 +872,14 @@ try {
   }
 
   console.log("\nthe provider chosen in the popup is the one used");
-  await ev(`chrome.storage.sync.set({providerOrder: ['tencent']})`);
+  await ev(`chrome.storage.sync.set({providerOrder: ['alibaba']})`);
   await sleep(600);
   await ctrlTap(SEL.ko);
   console.log("   ", JSON.stringify(await ev(`${SEL.ko}.textContent`)));
   check("the korean paragraph translated", (await ev(`${SEL.ko}.hasAttribute('data-ht-state')`)) === true);
-  check("and tencent served it", (await status())?.engine === "tencent", JSON.stringify(await status()));
+  check("and alibaba served it", (await status())?.engine === "alibaba", JSON.stringify(await status()));
   await ctrlTap(SEL.ko, 6000); // leave it untranslated for the display-mode checks below
-  await ev(`chrome.storage.sync.set({providerOrder: ['google','tencent','mymemory']})`);
+  await ev(`chrome.storage.sync.set({providerOrder: ['google','alibaba','mymemory']})`);
   await sleep(600);
 
   console.log("\nthe reported duration is the provider's own round trip");

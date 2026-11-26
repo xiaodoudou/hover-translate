@@ -27,14 +27,13 @@ No account, no API key, no paid service. Three free providers, tried in the orde
 
 | Provider | Notes |
 | --- | --- |
-| **Tencent TranSmart** | A mainland China provider, and the strongest of the three on Chinese |
+| **Alibaba** | A mainland China provider and strong on Chinese; one text per request, up to 5000 characters |
 | **Google** | Batches natively, fastest, widest language coverage |
 | **MyMemory** | Last resort: needs to be told the source language and caps each request at 500 characters |
 
-If one fails the next is tried, so a single outage is not a dead extension. TranSmart's round trip
-grows with the size of the block while Google's stays flat, so on a long one the two swap places and
-TranSmart becomes the fallback: a paragraph is worth a second for the better Chinese, a page-long
-block is not worth eight. A text provider that times out or cannot be reached goes to the back of
+If one fails the next is tried, so a single outage is not a dead extension. Alibaba replaced Tencent
+TranSmart, which shut down on 24 November 2026; a saved order that still names Tencent gets Alibaba
+in its place. A text provider that times out or cannot be reached goes to the back of
 the order for ten minutes, so an outage costs one timeout rather than one per block. The settings
 page shows which provider served the last block and how long it took, text and images counted
 separately; for text that is the whole wait, naming any provider that failed or was skipped on the

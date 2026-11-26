@@ -10,7 +10,7 @@
   "host_permissions": [
     "https://translate-pa.googleapis.com/*",
     "https://translate.googleapis.com/*",
-    "https://transmart.qq.com/*",
+    "https://translate.alibaba.com/*",
     "https://api.mymemory.translated.net/*",
     "https://translate.yandex.net/*",
     "https://lensfrontend-pa.googleapis.com/*",
