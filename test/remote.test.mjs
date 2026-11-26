@@ -26,7 +26,7 @@ console.log("unescapeEntities");
 check("entities become characters", unescapeEntities("a &lt;b&gt; &amp; &#39;c&#39;") === "a <b> & 'c'");
 check("fullwidth percent escapes are handled", unescapeEntities("x ％3Cy％3E") === "x <y>");
 
-for (const provider of ["google", "tencent", "mymemory"]) {
+for (const provider of ["google", "alibaba", "mymemory"]) {
   console.log(`\n${provider}: numbered tags survive`);
   try {
     const { texts, provider: used } = await translate([TAGGED], "en", provider);
@@ -74,10 +74,10 @@ console.log("\ngoogle: the gtx backup endpoint");
   check("tags survive the backup too", /<b0>[\s\S]*<\/b0>/.test(multi.texts[0]), multi.texts[0]);
 }
 
-console.log("\ntencent: batching and source language");
+console.log("\nalibaba: one request per text, and source language");
 {
   const { texts, detected } = await translate(
-    ["这是一段简体中文的测试文字。", "另一段中文。"], "en", "tencent");
+    ["这是一段简体中文的测试文字。", "另一段中文。"], "en", "alibaba");
   check("both items come back", texts.length === 2, JSON.stringify(texts));
   check("source language is reported", /^zh/.test(detected?.[0] || ""), JSON.stringify(detected));
 }
@@ -86,7 +86,7 @@ console.log("\nfailover: an unknown provider name falls back to trying them all"
 {
   const { texts, provider } = await translate(["这是一段简体中文的测试文字。"], "en", "ondevice");
   check("a retired setting still translates", /chinese|test/i.test(texts[0]), texts[0]);
-  check("and reports which provider served it", ["google", "tencent", "mymemory"].includes(provider), provider);
+  check("and reports which provider served it", ["google", "alibaba", "mymemory"].includes(provider), provider);
 }
 
 console.log("\nmymemory: refuses what it cannot do rather than returning rubbish");
@@ -106,30 +106,32 @@ console.log("\nmymemory: refuses what it cannot do rather than returning rubbish
     /source language/.test(noSource), noSource);
 }
 
-console.log("\na long block goes to the provider whose latency does not grow with it");
+console.log("\nalibaba: limits and marker spelling");
 {
-  // Text no cache has seen, so both providers are answering cold, as they do for a real block.
-  const WORDS = "服务 界面 启用 关闭 加速 设备 名称 支持 自定义 区分 路由器 实时 显示 运行 状态 内置 下载 架构".split(" ");
-  const body = (chars) =>
-    Array.from({ length: Math.ceil(chars / 2) }, () => WORDS[(Math.random() * WORDS.length) | 0]).join("");
-  // The pair handleTranslate() sends: the tagged copy of the block and the plain one beside it.
-  const sent = (chars) => {
-    const text = body(chars);
-    return [`<b0>${text}</b0>`, text];
+  const reason = async (texts) => {
+    try {
+      await translate(texts, "en", "alibaba");
+      return "";
+    } catch (error) {
+      return error.message;
+    }
   };
-  const DEFAULT = ["tencent", "google", "mymemory"];
+  const tooLong = await reason(["这".repeat(5001)]);
+  check("text past 5000 characters is refused before it is sent", /character limit/.test(tooLong), tooLong);
+  const atLimit = await translate(["这是一段中文。".repeat(700)], "en", "alibaba");
+  check("text at the limit is translated", atLimit.provider === "alibaba" && /[a-z]/i.test(atLimit.texts[0]));
+  // Traditional Chinese is where it writes a marker as <B0>; the adapter folds it back.
+  const hant = await translate(["<b0>這是一段</b0>繁體中文的<b1>測試文字</b1>。"], "en", "alibaba");
+  check("markers come back in the one spelling the parser knows", tagsIn(hant.texts[0]) === 4, hant.texts[0]);
+  const toHant = await translate(["<b0>Click here</b0> to read more."], "zh-Hant", "alibaba");
+  check("zh-Hant is accepted as a target", /[一-鿿]/.test(toHant.texts[0]), toHant.texts[0]);
+}
 
-  const short = await translate(sent(120), "en", DEFAULT);
-  check("a paragraph still goes to TranSmart, which is the better Chinese", short.provider === "tencent", short.provider);
-
-  const long = await translate(sent(2000), "en", DEFAULT);
-  check("a long block goes to Google instead", long.provider === "google", long.provider);
-  check("and is translated rather than refused", long.texts[0].length > 0, JSON.stringify(long.texts[0]).slice(0, 80));
-
-  // Reordering is only ever a tie-break between those two. An order the user set with Google
-  // already in front, or one naming a single provider, is handed back exactly as it came in.
-  const forced = await translate(sent(2000), "en", "tencent");
-  check("a forced provider is still honoured at any size", forced.provider === "tencent", forced.provider);
+console.log("\na long block still goes to the first provider in the order");
+{
+  const text = "这是一段比较长的中文文字，用来测试长度。".repeat(60);
+  const long = await translate([`<b0>${text}</b0>`, text], "en", ["alibaba", "google", "mymemory"]);
+  check("alibaba served it", long.provider === "alibaba", long.provider);
 }
 
 console.log(failures === 0 ? "\nALL PASS" : `\n${failures} FAILURE(S)`);

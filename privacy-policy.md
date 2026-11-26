@@ -1,6 +1,6 @@
 # Privacy policy: Hover Translate
 
-Last updated: 4 August 2026
+Last updated: 26 November 2026
 
 The Chrome Web Store requires a privacy policy at a public URL. This file's address in the
 repository serves that purpose.
@@ -20,7 +20,7 @@ The text is sent to whichever of these you have enabled, in your chosen order:
 | Provider | Endpoint | Their privacy policy |
 | --- | --- | --- |
 | Google | `translate-pa.googleapis.com`, `translate.googleapis.com` | https://policies.google.com/privacy |
-| Tencent TranSmart | `transmart.qq.com` | https://privacy.qq.com |
+| Alibaba | `translate.alibaba.com` | https://rule.alibaba.com/rule/detail/2034.htm |
 | MyMemory | `api.mymemory.translated.net` | https://mymemory.translated.net/doc/privacy.php |
 
 Once the text reaches a provider it is subject to that provider's own policy, which is linked above.

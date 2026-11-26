@@ -10,6 +10,7 @@ const LANGUAGES = [
 
 const PROVIDER_LABELS = {
   google: "Google",
+  alibaba: "Alibaba",
   tencent: "Tencent",
   mymemory: "MyMemory",
   cache: "Cached",
@@ -19,7 +20,7 @@ const PROVIDER_LABELS = {
   lens: "Google Lens",
 };
 
-const ALL_PROVIDERS = ["tencent", "google", "mymemory"];
+const ALL_PROVIDERS = ["alibaba", "google", "mymemory"];
 const ALL_OCR_PROVIDERS = ["youdao", "lens", "yandex"];
 // Filled in by the Test button: id -> { ok, detail }
 const verdicts = new Map();

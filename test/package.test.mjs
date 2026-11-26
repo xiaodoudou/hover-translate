@@ -44,7 +44,7 @@ check("no permission beyond storage", manifest.permissions.length === 1,
   JSON.stringify(manifest.permissions));
 
 const PROVIDER_HOSTS = ["translate-pa.googleapis.com", "translate.googleapis.com",
-  "transmart.qq.com", "api.mymemory.translated.net", "translate.yandex.net",
+  "translate.alibaba.com", "api.mymemory.translated.net", "translate.yandex.net",
   "lensfrontend-pa.googleapis.com", "aidemo.youdao.com"];
 for (const host of PROVIDER_HOSTS) {
   check(`host permission for ${host}`,

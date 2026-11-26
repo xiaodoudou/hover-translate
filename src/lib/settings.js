@@ -64,7 +64,7 @@ export const DEFAULTS = {
   // On-device translations come back in about 35ms, which would otherwise be a single frame flash.
   minLoadingMs: 400,
   // Tried top to bottom until one answers. Reorder or shorten it in the popup.
-  providerOrder: ["tencent", "google", "mymemory"],
+  providerOrder: ["alibaba", "google", "mymemory"],
   // Where notices appear, or "off" to silence them.
   toastPosition: "bottom-center",
 };
@@ -87,9 +87,19 @@ export async function getSettings() {
     ...DEFAULTS,
     ...stored,
     quickOrder: usableOrder(stored.quickOrder, stored.quickMap, stored.targetLang || DEFAULTS.targetLang),
+    providerOrder: usableProviders(stored.providerOrder),
     triggerKey,
     quickKey: quickFrom(stored.quickKey),
   };
+}
+
+// Tencent TranSmart shut down on 2026-11-24 and Alibaba took its place, so an order that still
+// names it gets Alibaba in the same slot rather than losing its first choice.
+const RETIRED = { tencent: "alibaba" };
+
+export function usableProviders(order) {
+  if (!Array.isArray(order)) return DEFAULTS.providerOrder;
+  return [...new Set(order.map((id) => RETIRED[id] || id))];
 }
 
 // Every writing system exactly once, in whatever order was stored, with anything missing added in

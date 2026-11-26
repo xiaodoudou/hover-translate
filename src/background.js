@@ -1,7 +1,7 @@
 // Every translation goes through here rather than the content script, so the host page's CSP cannot
 // block the request and no page ever sees which services are being called.
 //
-// Three providers, all free and none needing an account or an API key. Each was checked by hand
+// Three text providers, all free and none needing an account or an API key. Each was checked by hand
 // against the numbered <bN> tags this extension relies on before being wired in.
 
 import { hasScriptForeignTo, languageFromScript } from "./lib/script.js";
@@ -150,30 +150,66 @@ async function google(texts, sourceLang, targetLang) {
   }
 }
 
-// --- Tencent TranSmart ----------------------------------------------------
-// Keyless, batches like Google, and the strongest of the three on Chinese.
-const TRANSMART_URL = "https://transmart.qq.com/api/imt";
-const CLIENT_KEY = `browser-chrome-150.0.0-Windows 10-${Math.random().toString(36).slice(2)}-${Date.now()}`;
+// --- Alibaba --------------------------------------------------------------
+// Keyless behind a CSRF token anyone can fetch, and strong on Chinese. It took Tencent TranSmart's
+// place when TranSmart shut down on 2026-11-24. One text per request, so a block's tagged and plain
+// copies go out side by side.
+const ALIBABA_URL = "https://translate.alibaba.com/api/translate/text";
+const ALIBABA_TOKEN_URL = "https://translate.alibaba.com/api/translate/csrftoken";
+// Refused with TranslateFailed one character past this.
+const ALIBABA_MAX = 5000;
+// Its own codes where they differ from ours: zh-CN and zh-TW are refused outright.
+const ALIBABA_LANGS = { "zh-cn": "zh", "zh-hans": "zh", "zh-hant": "zh-tw", "zh-tw": "zh-tw" };
+const alibabaLang = (lang) => ALIBABA_LANGS[String(lang).toLowerCase()] || base(lang);
 
-async function tencent(texts, sourceLang, targetLang) {
-  const json = await fetchJson(TRANSMART_URL, {
+let alibabaToken = null;
+function alibabaCsrf(fresh = false) {
+  if (fresh || !alibabaToken) {
+    alibabaToken = fetchJson(ALIBABA_TOKEN_URL).catch((error) => {
+      alibabaToken = null;
+      throw error;
+    });
+  }
+  return alibabaToken;
+}
+
+// It sometimes writes a marker back as <B0> or </b1 >, which is the same marker to everyone else.
+const tidyMarkers = (text) => text.replace(/<\s*(\/?)\s*b\s*(\d+)\s*>/gi, "<$1b$2>");
+
+async function alibabaOne(text, sourceLang, targetLang, fresh = false) {
+  const csrf = await alibabaCsrf(fresh);
+  const form = new FormData();
+  form.append("srcLang", sourceLang === "auto" ? "auto" : alibabaLang(sourceLang));
+  form.append("tgtLang", alibabaLang(targetLang));
+  form.append("domain", "general");
+  form.append("query", text);
+  form.append(csrf.parameterName, csrf.token);
+  const response = await fetchWithTimeout(ALIBABA_URL, {
     method: "POST",
-    headers: { "content-type": "application/json", referer: "https://transmart.qq.com/zh-CN/index" },
-    body: JSON.stringify({
-      header: { fn: "auto_translation", client_key: CLIENT_KEY },
-      type: "plain",
-      model_category: "normal",
-      source: { lang: sourceLang === "auto" ? "auto" : sourceLang, text_list: texts },
-      target: { lang: targetLang },
-    }),
+    headers: { [csrf.headerName]: csrf.token },
+    body: form,
   });
-  if (json?.header?.ret_code !== "succ") throw new Error(json?.header?.ret_code || "request refused");
-  const rows = json?.auto_translation;
-  if (!Array.isArray(rows) || rows.length !== texts.length) throw new Error("unexpected response shape");
-  return {
-    texts: rows.map((row) => unescapeEntities(row)),
-    detected: texts.map(() => json.src_lang || null),
-  };
+  const body = await response.text();
+  let json;
+  try {
+    json = JSON.parse(body);
+  } catch {
+    // A token it no longer accepts gets the site's HTML page back rather than an error.
+    if (!fresh) return alibabaOne(text, sourceLang, targetLang, true);
+    throw new Error("request refused");
+  }
+  if (!json?.success || typeof json.data?.translateText !== "string") {
+    throw new Error(json?.code || json?.message || "request refused");
+  }
+  return { text: tidyMarkers(unescapeEntities(json.data.translateText)), detected: json.data.detectLanguage || null };
+}
+
+async function alibaba(texts, sourceLang, targetLang) {
+  if (texts.some((text) => text.length > ALIBABA_MAX)) {
+    throw new Error(`text longer than the ${ALIBABA_MAX} character limit`);
+  }
+  const rows = await Promise.all(texts.map((text) => alibabaOne(text, sourceLang, targetLang)));
+  return { texts: rows.map((row) => row.text), detected: rows.map((row) => row.detected) };
 }
 
 // --- MyMemory -------------------------------------------------------------
@@ -477,7 +513,7 @@ async function handleOcr({ url, image, order, targetLang = "en" }) {
 
 // --- dispatch -------------------------------------------------------------
 const PROVIDERS = [
-  { id: "tencent", run: tencent },
+  { id: "alibaba", run: alibaba },
   { id: "google", run: google },
   { id: "mymemory", run: mymemory },
 ];
@@ -504,42 +540,6 @@ export function keepsMarkers(sent, got) {
   return [...tally.values()].every((left) => left === 0);
 }
 
-// TranSmart's round trip grows with the size of the request while Google's is flat, so the two
-// swap places on a long block. Measured cold, against text no cache had seen, sending a block the
-// way handleTranslate() does — the tagged copy and the plain one together:
-//
-//    block text     TranSmart     Google
-//      200 chars        719ms      221ms
-//      600 chars       1877ms      267ms
-//     1200 chars       3931ms      306ms
-//     2400 chars       7589ms      566ms
-//
-// and past roughly 3000 characters TranSmart stops answering at all, refusing with "outOfLimit".
-// It stays first because it is the strongest of the three on Chinese, which is worth about a
-// second on a paragraph. It is not worth eight on a long one, so past the threshold below the flat
-// provider goes first and TranSmart keeps its place directly behind it, still the first fallback.
-const SIZE_SENSITIVE = "tencent";
-const FLAT_LATENCY = "google";
-// Total characters across every text in the request, which for a block is the tagged copy plus the
-// plain one. TranSmart costs a little over a millisecond per character of that total, so this is
-// where its answer stops arriving inside a second.
-const BIG_REQUEST = 800;
-
-function orderForSize(order, texts) {
-  const size = texts.reduce((total, text) => total + text.length, 0);
-  if (size <= BIG_REQUEST) return order;
-
-  const slow = order.findIndex((provider) => provider.id === SIZE_SENSITIVE);
-  const flat = order.findIndex((provider) => provider.id === FLAT_LATENCY);
-  // Nothing to swap unless the user has both and the size-sensitive one is being tried first.
-  if (slow === -1 || flat === -1 || slow > flat) return order;
-
-  // slow < flat, so removing the flat entry leaves the index to insert at where it was.
-  const out = order.filter((provider) => provider.id !== FLAT_LATENCY);
-  out.splice(slow, 0, order[flat]);
-  return out;
-}
-
 // `preferred` is the user's order of preference. A string still works, so a single provider can be
 // forced, and anything unrecognised falls back to the full list rather than failing outright.
 export async function translate(texts, targetLang, preferred, sourceLang = "auto") {
@@ -549,7 +549,7 @@ export async function translate(texts, targetLang, preferred, sourceLang = "auto
     .filter(Boolean);
   if (!order.length) order.push(...PROVIDERS);
   await restored;
-  order = backOfTheLine(orderForSize(order, texts));
+  order = backOfTheLine(order);
 
   const begunAt = Date.now();
   const failures = [];
@@ -610,7 +610,7 @@ async function handleTranslate({ texts, targetLang, order, sample = "" }) {
   // The majority wins, so one misread fragment cannot speak for the block.
   const sourceLang = [...tally.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || langs[0] || null;
 
-  // Tencent omits the source language entirely when it already matches the target, so a reply that
+  // A provider may omit the source language when it already matches the target, so a reply that
   // came back byte for byte is the only signal that there was nothing to do. The script check still
   // has the final say: text full of Han that came back unchanged is a failure, not English.
   const unchanged =
